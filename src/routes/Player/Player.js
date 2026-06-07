@@ -262,15 +262,7 @@ const Player = ({ urlParams, queryParams }) => {
         }
     }, [player.nextVideo, handleNextVideoNavigation, profile.settings]);
 
-    const onVideoClick = React.useCallback(() => {
-        if (video.state.paused !== null && !longPress.current) {
-            if (video.state.paused) {
-                onPlayRequestedDebounced();
-            } else {
-                onPauseRequestedDebounced();
-            }
-        }
-    }, [video.state.paused, longPress.current]);
+    const onVideoClick = React.useCallback(() => {}, []);
 
     const onVideoDoubleClick = React.useCallback(() => {
         onPlayRequestedDebounced.cancel();
