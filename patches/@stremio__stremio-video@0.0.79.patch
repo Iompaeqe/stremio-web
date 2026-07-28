@@ -102,23 +102,36 @@ index 902b93e3564339506e7757688dbd8ca11feb5ace..fdd6a69386bc3677764d6f04f5003fa2
                          critical: true,
 diff --git a/src/nativeHlsOnly.js b/src/nativeHlsOnly.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..df44c274dbfb0792fd034a369d9c5396dc683b32
+index 0000000000000000000000000000000000000000..bfbbb0cb94bd7c3ac3897355dc6c14df54eb01df
 --- /dev/null
 +++ b/src/nativeHlsOnly.js
-@@ -0,0 +1,25 @@
-+var Hls = require('hls.js');
-+
+@@ -0,0 +1,38 @@
 +var result = null;
 +
-+// True only for browsers that cannot run hls.js at all but do own a native HLS stack in the
-+// <video> element — in practice iOS/iPadOS Safari and the WebKit views built on it, where
-+// MediaSource does not exist (only ManagedMediaSource, which hls.js 1.5 does not use).
++// True only for browsers that have no full MediaSource but do own a native HLS stack in the
++// <video> element — in practice iPhone Safari and the iOS WebViews built on it.
 +//
-+// Everything gated on this is off wherever hls.js works, which is every desktop browser, so the
-+// stock code paths are left untouched there.
++// Deliberately NOT `!Hls.isSupported()`. hls.js >= 1.5 treats ManagedMediaSource as usable and in
++// fact prefers it — getMediaSource() defaults preferManagedMediaSource to true and returns
++// `(preferManagedMediaSource || !self.MediaSource) && self.ManagedMediaSource` before ever looking
++// at self.MediaSource — so on iOS 17.1+ `Hls.isSupported()` returns true and a gate built on it
++// never fires on the very devices it was meant to catch.
++//
++// ManagedMediaSource-only means "no real MSE". There we prefer the platform's own HLS stack over
++// driving hls.js through MMS: it is the more battery-friendly path, and MMS playback would still
++// be fed the unusable URLs this gate exists to correct.
++//
++// WebKitMediaSource counts as a full MediaSource — ancient Safari builds exposing only that still
++// run hls.js, which falls back to it. ManagedMediaSource explicitly does not count.
++//
++// Every desktop browser — Chrome, Vivaldi, Edge, Firefox, macOS Safari — and desktop-class iPadOS
++// Safari expose window.MediaSource, so the gate is false there and every code path guarded by it
++// keeps its stock behaviour.
 +function nativeHlsOnly() {
 +    if (result === null) {
-+        if (typeof document === 'undefined' || Hls.isSupported()) {
++        if (typeof window === 'undefined' || typeof document === 'undefined') {
++            result = false;
++        } else if (window.MediaSource || window.WebKitMediaSource) {
 +            result = false;
 +        } else {
 +            var probeElement = document.createElement('video');
