@@ -1,0 +1,263 @@
+diff --git a/src/HTMLVideo/HTMLVideo.js b/src/HTMLVideo/HTMLVideo.js
+index 902b93e3564339506e7757688dbd8ca11feb5ace..fdd6a69386bc3677764d6f04f5003fa214709f52 100644
+--- a/src/HTMLVideo/HTMLVideo.js
++++ b/src/HTMLVideo/HTMLVideo.js
+@@ -5,8 +5,19 @@ var deepFreeze = require('deep-freeze');
+ var Color = require('color');
+ var ERROR = require('../error');
+ var getContentType = require('./getContentType');
++var nativeHlsOnly = require('../nativeHlsOnly');
+ var HLS_CONFIG = require('./hlsConfig');
+ 
++// The content type the producer of the stream already told us about, if any. withStreamingServer
++// declares one for the /hlsv2/ playlists it builds, which saves probing for it over the network.
++function declaredContentType(stream) {
++    return stream && stream.behaviorHints && stream.behaviorHints.headers &&
++        typeof stream.behaviorHints.headers['content-type'] === 'string' ?
++        stream.behaviorHints.headers['content-type']
++        :
++        null;
++}
++
+ function HTMLVideo(options) {
+     options = options || {};
+ 
+@@ -603,38 +614,46 @@ function HTMLVideo(options) {
+                     onPropChanged('audioTracks');
+                     onPropChanged('selectedAudioTrackId');
+                     onPropChanged('fullscreen');
+-                    getContentType(stream)
+-                        .then(function(contentType) {
+-                            if (stream !== commandArgs.stream) {
+-                                return;
+-                            }
+-
+-                            if (contentType === 'application/vnd.apple.mpegurl' && Hls.isSupported()) {
+-                                hls = new Hls(HLS_CONFIG);
+-                                hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, function() {
+-                                    onPropChanged('audioTracks');
+-                                    onPropChanged('selectedAudioTrackId');
+-                                });
+-                                hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, function() {
+-                                    onPropChanged('audioTracks');
+-                                    onPropChanged('selectedAudioTrackId');
+-                                });
+-                                hls.on(Hls.Events.MANIFEST_LOADING, function() {
+-                                    hls.subtitleTrack = -1;
+-                                });
+-                                hls.loadSource(stream.url);
+-                                hls.attachMedia(videoElement);
+-                            } else {
++                    if (nativeHlsOnly() && declaredContentType(stream) === 'application/vnd.apple.mpegurl') {
++                        // hls.js cannot run here, but the platform plays HLS natively: hand the
++                        // playlist straight to the element. Probing the content type first would
++                        // only cost a round trip (and open a stray transcoding session on the
++                        // server) on the way to this very same assignment.
++                        videoElement.src = stream.url;
++                    } else {
++                        getContentType(stream)
++                            .then(function(contentType) {
++                                if (stream !== commandArgs.stream) {
++                                    return;
++                                }
++
++                                if (contentType === 'application/vnd.apple.mpegurl' && Hls.isSupported()) {
++                                    hls = new Hls(HLS_CONFIG);
++                                    hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, function() {
++                                        onPropChanged('audioTracks');
++                                        onPropChanged('selectedAudioTrackId');
++                                    });
++                                    hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, function() {
++                                        onPropChanged('audioTracks');
++                                        onPropChanged('selectedAudioTrackId');
++                                    });
++                                    hls.on(Hls.Events.MANIFEST_LOADING, function() {
++                                        hls.subtitleTrack = -1;
++                                    });
++                                    hls.loadSource(stream.url);
++                                    hls.attachMedia(videoElement);
++                                } else {
++                                    videoElement.src = stream.url;
++                                }
++                            })
++                            .catch(function() {
++                                if (stream !== commandArgs.stream) {
++                                    return;
++                                }
++
+                                 videoElement.src = stream.url;
+-                            }
+-                        })
+-                        .catch(function() {
+-                            if (stream !== commandArgs.stream) {
+-                                return;
+-                            }
+-
+-                            videoElement.src = stream.url;
+-                        });
++                            });
++                    }
+                 } else {
+                     onError(Object.assign({}, ERROR.UNSUPPORTED_STREAM, {
+                         critical: true,
+diff --git a/src/nativeHlsOnly.js b/src/nativeHlsOnly.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..df44c274dbfb0792fd034a369d9c5396dc683b32
+--- /dev/null
++++ b/src/nativeHlsOnly.js
+@@ -0,0 +1,25 @@
++var Hls = require('hls.js');
++
++var result = null;
++
++// True only for browsers that cannot run hls.js at all but do own a native HLS stack in the
++// <video> element — in practice iOS/iPadOS Safari and the WebKit views built on it, where
++// MediaSource does not exist (only ManagedMediaSource, which hls.js 1.5 does not use).
++//
++// Everything gated on this is off wherever hls.js works, which is every desktop browser, so the
++// stock code paths are left untouched there.
++function nativeHlsOnly() {
++    if (result === null) {
++        if (typeof document === 'undefined' || Hls.isSupported()) {
++            result = false;
++        } else {
++            var probeElement = document.createElement('video');
++            result = typeof probeElement.canPlayType === 'function' &&
++                probeElement.canPlayType('application/vnd.apple.mpegurl') !== '';
++        }
++    }
++
++    return result;
++}
++
++module.exports = nativeHlsOnly;
+diff --git a/src/withStreamingServer/withStreamingServer.js b/src/withStreamingServer/withStreamingServer.js
+index 5e51c7976e73b9875217680b0d193a3a40877568..72f6060857c23632e261c2f2e94799d15f464972 100644
+--- a/src/withStreamingServer/withStreamingServer.js
++++ b/src/withStreamingServer/withStreamingServer.js
+@@ -8,8 +8,79 @@ var convertStream = require('./convertStream');
+ var fetchVideoParams = require('./fetchVideoParams');
+ var isPlayerLoaded = require('./isPlayerLoaded');
+ var supportsTranscoding = require('../supportsTranscoding');
++var nativeHlsOnly = require('../nativeHlsOnly');
+ var ERROR = require('../error');
+ 
++// ---------------------------------------------------------------------------------------------
++// Native-HLS transcoding path (iOS Safari).
++//
++// A browser without MediaSource cannot run hls.js, so the /hlsv2/ playlist has to be handed to the
++// <video> element as a plain src and decoded by the platform's own HLS stack. Two things get in the
++// way of that when the streaming server is reached through a reverse proxy, and both are corrected
++// below — but only while `nativeHlsOnly()` is true, so every browser that can run hls.js keeps the
++// stock behaviour untouched.
++//
++//   1. `url.resolve(base, '/hlsv2/...')` replaces the base path instead of extending it, so a
++//      streaming server mounted on a subpath (https://host/stremio-server/) loses that prefix and
++//      the request never reaches the server at all. `joinServerURL` joins rather than replaces; for
++//      a server URL whose path is already "/" it produces the exact same string as `url.resolve`.
++//
++//   2. `mediaURL` is fetched by the *streaming server*, not by the browser. Handing it the public
++//      URL sends the server back out through its own reverse proxy, where an access-control layer
++//      answers with a login redirect and the transcode fails with HTTP 500. Anything the server
++//      serves itself (a torrent addressed by infoHash/fileIdx) is always reachable on its own
++//      loopback origin, so point it there instead. The URL the *browser* uses is never rewritten.
++// ---------------------------------------------------------------------------------------------
++
++// The port the streaming server always listens on; its own loopback view of itself.
++var SERVER_LOCAL_ORIGIN = 'http://127.0.0.1:11470';
++
++function joinServerURL(streamingServerURL, path) {
++    var base = streamingServerURL.charAt(streamingServerURL.length - 1) === '/' ?
++        streamingServerURL
++        :
++        streamingServerURL + '/';
++    return new URL(path.replace(/^\/+/, ''), base).href;
++}
++
++function resolveServerURL(streamingServerURL, path) {
++    return nativeHlsOnly() ?
++        joinServerURL(streamingServerURL, path)
++        :
++        url.resolve(streamingServerURL, path);
++}
++
++function serverLocalMediaURL(streamingServerURL, mediaURL, infoHash, fileIdx) {
++    if (!nativeHlsOnly()) {
++        return mediaURL;
++    }
++
++    if (typeof infoHash !== 'string' || infoHash.length === 0 || fileIdx === null || fileIdx === undefined || !isFinite(fileIdx)) {
++        return mediaURL;
++    }
++
++    var parsedMediaURL;
++    var parsedServerURL;
++    try {
++        parsedMediaURL = new URL(mediaURL);
++        parsedServerURL = new URL(streamingServerURL);
++    } catch (error) {
++        return mediaURL;
++    }
++
++    // Only files served by this streaming server can be re-addressed on its loopback origin.
++    if (parsedMediaURL.origin !== parsedServerURL.origin) {
++        return mediaURL;
++    }
++
++    var localPath = '/' + infoHash.toLowerCase() + '/' + fileIdx;
++    if (parsedMediaURL.pathname.toLowerCase().slice(-localPath.length) !== localPath) {
++        return mediaURL;
++    }
++
++    return SERVER_LOCAL_ORIGIN + localPath;
++}
++
+ function withStreamingServer(Video) {
+     function VideoWithStreamingServer(options) {
+         options = options || {};
+@@ -131,7 +202,11 @@ function withStreamingServer(Video) {
+                                     audioCodecs: audioCodecs,
+                                     maxAudioChannels: maxAudioChannels
+                                 });
+-                                return (commandArgs.forceTranscoding ? Promise.resolve(false) : VideoWithStreamingServer.canPlayStream({ url: mediaURL }, canPlayStreamOptions))
++                                // How the streaming server itself has to address the media. Equal to
++                                // mediaURL except on the native-HLS path; the browser keeps using
++                                // mediaURL for direct playback.
++                                var serverMediaURL = serverLocalMediaURL(commandArgs.streamingServerURL, mediaURL, infoHash, fileIdx);
++                                return (commandArgs.forceTranscoding ? Promise.resolve(false) : VideoWithStreamingServer.canPlayStream({ url: serverMediaURL }, canPlayStreamOptions))
+                                     .catch(function(error) {
+                                         console.warn('Media probe error', error);
+                                         return false;
+@@ -149,7 +224,7 @@ function withStreamingServer(Video) {
+                                         }
+ 
+                                         var id = hat();
+-                                        var queryParams = new URLSearchParams([['mediaURL', mediaURL]]);
++                                        var queryParams = new URLSearchParams([['mediaURL', serverMediaURL]]);
+                                         if (commandArgs.forceTranscoding) {
+                                             queryParams.set('forceTranscoding', '1');
+                                         }
+@@ -169,12 +244,12 @@ function withStreamingServer(Video) {
+                                             infoHash: infoHash,
+                                             fileIdx: fileIdx,
+                                             stream: {
+-                                                url: url.resolve(commandArgs.streamingServerURL, '/hlsv2/' + id + '/master.m3u8?' + queryParams.toString()),
++                                                url: resolveServerURL(commandArgs.streamingServerURL, '/hlsv2/' + id + '/master.m3u8?' + queryParams.toString()),
+                                                 subtitles: Array.isArray(commandArgs.stream.subtitles) ?
+                                                     commandArgs.stream.subtitles.map(function(track) {
+                                                         return Object.assign({}, track, {
+                                                             url: typeof track.url === 'string' ?
+-                                                                url.resolve(commandArgs.streamingServerURL, '/subtitles.vtt?' + new URLSearchParams([['from', track.url]]).toString())
++                                                                resolveServerURL(commandArgs.streamingServerURL, '/subtitles.vtt?' + new URLSearchParams([['from', track.url]]).toString())
+                                                                 :
+                                                                 track.url
+                                                         });
+@@ -357,7 +432,7 @@ function withStreamingServer(Video) {
+                 }
+                 // probing normally gives more accurate results
+                 var queryParams = new URLSearchParams([['mediaURL', stream.url]]);
+-                return fetch(url.resolve(options.streamingServerURL, '/hlsv2/probe?' + queryParams.toString()))
++                return fetch(resolveServerURL(options.streamingServerURL, '/hlsv2/probe?' + queryParams.toString()))
+                     .then(function(resp) {
+                         return resp.json();
+                     })

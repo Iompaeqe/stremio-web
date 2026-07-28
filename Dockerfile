@@ -30,7 +30,11 @@ RUN apk add --no-cache git \
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml ./
+# pnpm-workspace.yaml + patches/ carry the `patchedDependencies` entry for
+# @stremio/stremio-video (see patches/ for what it changes and why). They are inputs to `pnpm
+# install`, so they must land before it or the install fails on an outdated lockfile.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile
 
 COPY . .

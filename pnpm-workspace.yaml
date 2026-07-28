@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@stremio/stremio-video@0.0.79': patches/@stremio__stremio-video@0.0.79.patch
