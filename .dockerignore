@@ -1,0 +1,26 @@
+# NOTE: .git is deliberately NOT ignored — webpack derives the asset directory name (and therefore
+# the cache-busting key) from `git rev-parse HEAD`. If you do exclude it, pass the hash explicitly:
+#     docker build --build-arg COMMIT_HASH=$(git rev-parse HEAD) .
+
+node_modules
+build
+dist
+
+.github
+.idea
+.vscode
+tests
+
+Dockerfile
+.dockerignore
+.gitignore
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+CStremio.lnk
+StartStremioNoClickPause.vbs
+CODE_OF_CONDUCT.md
+LICENSE.md
+README.md

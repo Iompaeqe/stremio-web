@@ -12,7 +12,25 @@ const CopyWebpackPlugin = require('copy-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
 const packageJson = require('./package.json');
 
-const COMMIT_HASH = execSync('git rev-parse HEAD').toString().trim();
+// Prefer an explicitly provided COMMIT_HASH (e.g. a Docker build arg), fall back to git,
+// and finally to a placeholder so the build still works outside a git checkout.
+const COMMIT_HASH = process.env.COMMIT_HASH || (() => {
+    try {
+        return execSync('git rev-parse HEAD').toString().trim();
+    } catch (e) {
+        console.warn('Could not resolve the commit hash from git, falling back to "dev"');
+        return 'dev';
+    }
+})();
+
+// Streaming server used by default on a fresh profile. Overridable at build time
+// (DEFAULT_STREAMING_SERVER_URL=... npm run build) and at runtime in Settings -> Streaming.
+const DEFAULT_STREAMING_SERVER_URL = process.env.DEFAULT_STREAMING_SERVER_URL || 'https://homeiomp.xyz/stremio-server/';
+
+// EnvironmentPlugin prefers process.env over the defaults below, and Docker exposes unset build
+// args as empty strings. Write the resolved values back so an empty var cannot win.
+process.env.COMMIT_HASH = COMMIT_HASH;
+process.env.DEFAULT_STREAMING_SERVER_URL = DEFAULT_STREAMING_SERVER_URL;
 
 const THREAD_LOADER = {
     loader: 'thread-loader',
@@ -211,6 +229,7 @@ module.exports = (env, argv) => ({
         new webpack.ProgressPlugin(),
         new webpack.EnvironmentPlugin({
             SENTRY_DSN: null,
+            DEFAULT_STREAMING_SERVER_URL,
             ...env,
             SERVICE_WORKER_DISABLED: false,
             DEBUG: argv.mode !== 'production',

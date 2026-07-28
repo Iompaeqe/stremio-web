@@ -1,41 +1,65 @@
-# Stremio Node 20.x
-# the node version for running Stremio Web
-ARG NODE_VERSION=20-alpine
-FROM node:$NODE_VERSION AS base
+# Stremio Web — HomeIomp deployment image.
+#
+# Multi-stage: node build -> nginx static server on port 3000 (HomeIomp convention).
+#
+# The production build uses webpack's default `output.publicPath: 'auto'`, so every asset URL
+# (scripts, styles, fonts, images, the wasm binary, the web worker, the service worker and the
+# precache manifest) is resolved relative to the document / worker script at runtime. The image
+# therefore serves the app from "/" and is mounted under a subpath by the reverse proxy, e.g.
+#
+#     redir /stremio /stremio/ 308
+#     handle_path /stremio/* { reverse_proxy stremio-web:3000 }
+#
+# The trailing-slash redirect is required: relative asset resolution and the service worker scope
+# both depend on the document living at /stremio/ rather than /stremio.
 
-# Setup pnpm
+# ---------------------------------------------------------------------------
+# Build stage
+# ---------------------------------------------------------------------------
+# Node version comes from .nvmrc.
+FROM node:20-alpine AS build
+
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
-RUN corepack enable
-RUN apk add --no-cache git
+# git: webpack derives the asset directory name from the commit hash (cache busting).
+RUN apk add --no-cache git \
+    && corepack enable \
+    && corepack prepare pnpm@10.25.0 --activate
 
-# Meta
-LABEL Description="Stremio Web" Vendor="Smart Code OOD" Version="1.0.0"
+WORKDIR /app
 
-RUN mkdir -p /var/www/stremio-web
-WORKDIR /var/www/stremio-web
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
-# Setup app
-FROM base AS app
+COPY . .
 
-COPY package.json pnpm-lock.yaml /var/www/stremio-web
-RUN pnpm i --frozen-lockfile
+# Optional overrides. COMMIT_HASH short-circuits the `git rev-parse HEAD` lookup (useful when the
+# build context has no .git); DEFAULT_STREAMING_SERVER_URL changes the streaming server a fresh
+# profile starts with.
+ARG COMMIT_HASH=""
+ARG DEFAULT_STREAMING_SERVER_URL=""
+ENV COMMIT_HASH=$COMMIT_HASH
+ENV DEFAULT_STREAMING_SERVER_URL=$DEFAULT_STREAMING_SERVER_URL
 
-COPY . /var/www/stremio-web
+RUN git config --global --add safe.directory /app 2>/dev/null || true
 RUN pnpm build
 
-# Setup server
-FROM base AS server
+# ---------------------------------------------------------------------------
+# Runtime stage
+# ---------------------------------------------------------------------------
+FROM nginx:alpine
 
-RUN pnpm i express@4
+LABEL org.opencontainers.image.title="Stremio Web" \
+      org.opencontainers.image.description="Stremio Web served for HomeIomp under /stremio"
 
-# Finalize
-FROM base
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/build /usr/share/nginx/html
 
-COPY http_server.js /var/www/stremio-web
-COPY --from=server /var/www/stremio-web/node_modules /var/www/stremio-web/node_modules
-COPY --from=app /var/www/stremio-web/build /var/www/stremio-web/build
+EXPOSE 3000
 
-EXPOSE 8080
-CMD ["node", "http_server.js"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:3000/index.html || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

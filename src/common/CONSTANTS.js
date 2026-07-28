@@ -1,7 +1,13 @@
 // Copyright (C) 2017-2023 Smart code 203358507
 
 const CHROMECAST_RECEIVER_APP_ID = '1634F54B';
-const DEFAULT_STREAMING_SERVER_URL = 'http://127.0.0.1:11470/';
+// The streaming server URL that stremio-core itself ships with. Used to detect a profile whose
+// streaming server has never been changed, so we can swap in our own default exactly once.
+const CORE_DEFAULT_STREAMING_SERVER_URL = 'http://127.0.0.1:11470/';
+// The default this build ships with. Injected by webpack (EnvironmentPlugin) and overridable at
+// build time via the DEFAULT_STREAMING_SERVER_URL env var. Whatever the user picks in
+// Settings -> Streaming always wins over this.
+const DEFAULT_STREAMING_SERVER_URL = process.env.DEFAULT_STREAMING_SERVER_URL || CORE_DEFAULT_STREAMING_SERVER_URL;
 const DEFAULT_SUBTITLES_LANGUAGE = 'eng';
 const LOCAL_SUBTITLES_LANGUAGE = 'local';
 const SUBTITLES_SIZES = [75, 100, 125, 150, 175, 200, 250];
@@ -123,6 +129,7 @@ const PROTOCOL = 'stremio:';
 
 module.exports = {
     CHROMECAST_RECEIVER_APP_ID,
+    CORE_DEFAULT_STREAMING_SERVER_URL,
     DEFAULT_STREAMING_SERVER_URL,
     DEFAULT_SUBTITLES_LANGUAGE,
     LOCAL_SUBTITLES_LANGUAGE,
