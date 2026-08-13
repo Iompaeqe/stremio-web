@@ -123,6 +123,13 @@ html:not(.active-slider-within) {
             bottom: 10rem;
         }
 
+        // HomeIomp: the double-tap seek flash. Sits directly above the video and below the
+        // bars, and never takes a pointer event of its own.
+        &.seek-indicator-layer {
+            background: transparent;
+            pointer-events: none;
+        }
+
         &.menu-layer {
             top: initial;
             left: initial;

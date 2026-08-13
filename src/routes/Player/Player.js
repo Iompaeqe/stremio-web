@@ -33,6 +33,8 @@ const Video = require('./Video');
 const { default: Indicator } = require('./Indicator/Indicator');
 const { default: useMediaSession } = require('./useMediaSession');
 const { isPictureInPictureSupported, recordPictureInPicture, togglePictureInPicture } = require('stremio/common/pictureInPicture');
+const { default: useDoubleTapSeek } = require('./useDoubleTapSeek');
+const { default: SeekIndicator } = require('./SeekIndicator/SeekIndicator');
 
 const findTrackByLang = (tracks, lang) => tracks.find((track) => track.lang === lang || langs.where('1', track.lang)?.[2] === lang);
 const findTrackById = (tracks, id) => tracks.find((track) => track.id === id);
@@ -309,11 +311,25 @@ const Player = ({ urlParams, queryParams }) => {
 
     const onVideoClick = React.useCallback(() => {}, []);
 
+    // HomeIomp: double-tap the outer thirds to seek (touch only - see useDoubleTapSeek).
+    const { feedback: seekFeedback, onTouchEnd: onVideoTouchEnd, seekConsumed } = useDoubleTapSeek({
+        enabled: platform.isMobile,
+        time: video.state.time,
+        duration: video.state.duration,
+        step: settings.seekTimeDuration,
+        onSeekRequested,
+        onSeekStarted: React.useCallback(() => setSeeking(true), []),
+    });
+
     const onVideoDoubleClick = React.useCallback(() => {
+        // A double TAP that was already spent on a seek must not also toggle fullscreen;
+        // some browsers synthesise the double-click from the same gesture regardless of the
+        // preventDefault on touchend.
+        if (seekConsumed()) return;
         onPlayRequestedDebounced.cancel();
         onPauseRequestedDebounced.cancel();
         toggleFullscreen();
-    }, [toggleFullscreen]);
+    }, [toggleFullscreen, seekConsumed]);
 
     const onContainerMouseDown = React.useCallback((event) => {
         if (!event.nativeEvent.optionsMenuClosePrevented) {
@@ -818,6 +834,11 @@ const Player = ({ urlParams, queryParams }) => {
                 className={styles['layer']}
                 onClick={onVideoClick}
                 onDoubleClick={onVideoDoubleClick}
+                onTouchEnd={onVideoTouchEnd}
+            />
+            <SeekIndicator
+                className={classnames(styles['layer'], styles['seek-indicator-layer'])}
+                feedback={seekFeedback}
             />
             {
                 !video.state.loaded ?

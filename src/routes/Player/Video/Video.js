@@ -5,9 +5,9 @@ const PropTypes = require('prop-types');
 const classnames = require('classnames');
 const styles = require('./styles');
 
-const Video = React.forwardRef(({ className, onClick, onDoubleClick }, ref) => {
+const Video = React.forwardRef(({ className, onClick, onDoubleClick, onTouchEnd }, ref) => {
     return (
-        <div className={classnames(className, styles['video-container'])} onClick={onClick} onDoubleClick={onDoubleClick}>
+        <div className={classnames(className, styles['video-container'])} onClick={onClick} onDoubleClick={onDoubleClick} onTouchEnd={onTouchEnd}>
             <div ref={ref} className={styles['video']} />
         </div>
     );
@@ -19,6 +19,7 @@ Video.propTypes = {
     className: PropTypes.string,
     onClick: PropTypes.func,
     onDoubleClick: PropTypes.func,
+    onTouchEnd: PropTypes.func,
 };
 
 module.exports = Video;

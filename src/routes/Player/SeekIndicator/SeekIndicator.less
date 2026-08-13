@@ -1,0 +1,60 @@
+// HomeIomp: double-tap seek feedback. Purely decorative - the container fills the player as
+// a layer, and nothing inside it may ever take a tap, or it would swallow the next tap in a
+// chain.
+
+.seek-indicator-container {
+    pointer-events: none;
+    user-select: none;
+    background: transparent;
+
+    .seek-indicator {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 35%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        color: var(--primary-foreground-color);
+        background-color: var(--overlay-color);
+        animation: seek-indicator-fade 1s ease-out forwards;
+
+        .chevrons {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .icon {
+            width: 2.5rem;
+            height: 2.5rem;
+            color: var(--primary-foreground-color);
+        }
+
+        .label {
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+    }
+
+    &.backward .seek-indicator {
+        left: 0;
+        border-top-right-radius: 50% 40%;
+        border-bottom-right-radius: 50% 40%;
+    }
+
+    &.forward .seek-indicator {
+        right: 0;
+        border-top-left-radius: 50% 40%;
+        border-bottom-left-radius: 50% 40%;
+    }
+}
+
+@keyframes seek-indicator-fade {
+    0% { opacity: 0; }
+    12% { opacity: 1; }
+    65% { opacity: 1; }
+    100% { opacity: 0; }
+}
