@@ -11,14 +11,29 @@ const useMediaSession = (
 ) => {
     const { shell } = usePlatform();
 
+    // HomeIomp: the audio session stays on 'playback' for the whole life of the player,
+    // fullscreen included. Upstream downgrades it to 'ambient' while `fullscreen` is true
+    // (671170a9, "feat: fullscreen support on safari") and that is what kills the sound on
+    // an iPhone:
+    //
+    //   * 'ambient' maps to AVAudioSessionCategoryAmbient in WebKit — audio silenced by the
+    //     hardware Ring/Silent switch, silenced by screen lock, and not allowed to keep
+    //     playing while Safari is in the background.
+    //   * On iPhone the player has no Fullscreen API, so FullscreenProvider goes through
+    //     videoElement.webkitEnterFullscreen(); `webkitbeginfullscreen` (which also fires
+    //     when fullscreen is entered from iOS's own video controls) flips `fullscreen` to
+    //     true, this effect runs, and playback goes mute for anyone with the ringer switch
+    //     on silent — exactly the state the phone spends most of its life in.
+    //   * Picture-in-Picture is entered from that same native fullscreen UI and needs a
+    //     background-capable session, which 'ambient' is not.
+    //
+    // 'playback' is the correct category for a video player and is what the platform picks
+    // for one anyway, so nothing is lost by holding it. `fullscreen` stays in the signature:
+    // the hook is fullscreen-aware for other reasons and callers pass it positionally.
     useEffect(() => {
         if (!('audioSession' in navigator)) return;
-        const audioSession = (navigator as any).audioSession;
-        audioSession.type = fullscreen ? 'ambient' : 'playback';
-        return () => {
-            audioSession.type = 'playback';
-        };
-    }, [fullscreen]);
+        (navigator as any).audioSession.type = 'playback';
+    }, []);
 
     // Playback state
     useEffect(() => {
