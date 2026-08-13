@@ -1,6 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePlatform } from 'stremio/common';
+import {
+    assertPlaybackAudioSession,
+    audioSessionWriteReport,
+    fullscreenReport,
+    readAudioSessionType,
+} from 'stremio/common/audioSession';
 import { Option, Section } from '../components';
 import styles from './Info.less';
 
@@ -17,12 +23,22 @@ const Info = ({ streamingServer }: Props) => {
             streamingServer.settings.content as StreamingServerSettings : null
     ), [streamingServer?.settings]);
 
-    // Read on every render (this panel is cheap and only rendered in Settings) so the value
-    // is the live one, not one captured when the app booted.
-    const audioSessionType = 'audioSession' in navigator ?
-        String((navigator as any).audioSession?.type ?? 'unknown')
-        :
-        'unsupported';
+    // HomeIomp diagnostic. `tick` exists only to re-read the values after the line is
+    // tapped; the reads themselves are trivial.
+    const [tick, setTick] = useState(0);
+    const audioSession = useMemo(() => ({
+        type: readAudioSessionType(),
+        write: audioSessionWriteReport(),
+        fullscreen: fullscreenReport(),
+    }), [tick]);
+
+    // Tapping the line performs the write from inside a real user gesture - the one context
+    // WebKit may treat differently from a write made during a React effect - and shows what
+    // came back. Tap it, and the value to the left is what WebKit accepted.
+    const onAudioSessionClick = useCallback(() => {
+        assertPlaybackAudioSession('settings-tap');
+        setTick((value) => value + 1);
+    }, []);
 
     return (
         <Section className={styles['info']}>
@@ -38,15 +54,36 @@ const Info = ({ streamingServer }: Props) => {
             </Option>
             {/*
                 HomeIomp diagnostic, deliberately untranslated and deliberately here rather
-                than in a debug overlay: an iPhone has no developer console, so this line is
-                the only way its owner can answer "does this device even have the WebKit
-                audio session API, and what is it set to" — the question the fullscreen
-                sound fix turns on. 'playback' is what the player asserts and holds;
-                'unsupported' would mean the fix cannot be the whole story on this device.
+                than in a debug overlay: an iPhone has no developer console, so these lines
+                are the only way its owner can report what the audio session actually did.
+
+                "Audio session" is the LIVE type for this document, and it resets to 'auto'
+                whenever the document is torn down and reloaded - which iOS does to
+                backgrounded tabs and home screen web apps constantly - so on its own it says
+                nothing about whether the player's write worked. Tap it to write from inside
+                a real user gesture and see the result immediately.
+
+                "Audio session write" is the last write the player attempted, kept in
+                localStorage so it survives those reloads: before→after, why, and how long
+                ago. after=playback means the write lands; after=auto means WebKit refused it.
+
+                "Last fullscreen" is the element's state at the last fullscreen transition -
+                the moment the sound is reported to die, and the one moment that cannot be
+                inspected from a phone.
             */}
             <Option label={'Audio session'}>
+                <div className={styles['label']} onClick={onAudioSessionClick}>
+                    {audioSession.type}
+                </div>
+            </Option>
+            <Option label={'Audio session write'}>
                 <div className={styles['label']}>
-                    {audioSessionType}
+                    {audioSession.write}
+                </div>
+            </Option>
+            <Option label={'Last fullscreen'}>
+                <div className={styles['label']}>
+                    {audioSession.fullscreen}
                 </div>
             </Option>
             {

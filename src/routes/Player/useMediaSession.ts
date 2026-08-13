@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { usePlatform } from 'stremio/common';
+import { assertPlaybackAudioSession, recordFullscreenTransition } from 'stremio/common/audioSession';
 
 const useMediaSession = (
     videoState: VideoState,
@@ -31,37 +32,42 @@ const useMediaSession = (
     // for one anyway, so nothing is lost by holding it. `fullscreen` stays in the signature:
     // the hook is fullscreen-aware for other reasons and callers pass it positionally.
     //
-    // The type is asserted once on mount - before the element exists, so before the first
-    // play() and long before any fullscreen transition, which is the order WebKit wants -
-    // and then re-asserted on the media events that could plausibly disturb it. Nothing
-    // else in this app or in @stremio/stremio-video writes navigator.audioSession (checked
-    // across src/ and node_modules/), so the re-assert is belt and braces rather than a
-    // known fight; it is guarded on the current value, so in the normal case it writes
-    // nothing at all. Listeners are on document in the CAPTURE phase because none of these
-    // events bubble - capture still reaches them on the way down to the element - which
-    // also means this does not need a reference to the video element that
-    // @stremio/stremio-video creates for itself.
+    // The type is asserted on mount - before the element exists, so before the first play()
+    // and long before any fullscreen transition, which is the order WebKit wants - then
+    // re-asserted on the media events that could disturb it, and again on the first pointer
+    // event, which is the one context that is unambiguously a USER GESTURE. Some WebKit
+    // capabilities are only granted inside one, and an assertion that costs nothing is
+    // cheaper than another round trip to find out. assertPlaybackAudioSession writes only
+    // when the value is not already right and never throws.
+    //
+    // Media events are listened for on document in the CAPTURE phase: none of them bubble,
+    // but capture still reaches them on the way down to the element, which also means this
+    // hook needs no handle on the video element that @stremio/stremio-video creates for
+    // itself. The fullscreen ones additionally snapshot that element's state (muted, volume,
+    // the session type at that instant) into the diagnostic, because the transition is
+    // exactly the moment the sound is reported to die and exactly the moment nobody can
+    // inspect from a phone.
     useEffect(() => {
-        if (!('audioSession' in navigator)) return;
-        const audioSession = (navigator as any).audioSession;
-        const assertPlayback = () => {
-            if (audioSession.type !== 'playback') {
-                audioSession.type = 'playback';
-            }
-        };
-        const events = [
-            'webkitbeginfullscreen',
-            'webkitendfullscreen',
-            'webkitpresentationmodechanged',
-            'loadedmetadata',
-            'play',
-            'playing',
-        ];
+        const mediaEvents = ['loadedmetadata', 'play', 'playing'];
+        const fullscreenEvents = ['webkitbeginfullscreen', 'webkitendfullscreen', 'webkitpresentationmodechanged', 'fullscreenchange'];
+        const gestureEvents = ['pointerdown', 'touchend'];
 
-        assertPlayback();
-        events.forEach((event) => document.addEventListener(event, assertPlayback, true));
+        const onMediaEvent = (event: Event) => assertPlaybackAudioSession('media:' + event.type);
+        const onGesture = (event: Event) => assertPlaybackAudioSession('gesture:' + event.type);
+        const onFullscreenEvent = (event: Event) => {
+            // Assert FIRST, then record, so the snapshot shows what the player left behind.
+            assertPlaybackAudioSession('fs:' + event.type);
+            recordFullscreenTransition(event.type, event.target);
+        };
+
+        assertPlaybackAudioSession('player-mount');
+        mediaEvents.forEach((event) => document.addEventListener(event, onMediaEvent, true));
+        fullscreenEvents.forEach((event) => document.addEventListener(event, onFullscreenEvent, true));
+        gestureEvents.forEach((event) => document.addEventListener(event, onGesture, true));
         return () => {
-            events.forEach((event) => document.removeEventListener(event, assertPlayback, true));
+            mediaEvents.forEach((event) => document.removeEventListener(event, onMediaEvent, true));
+            fullscreenEvents.forEach((event) => document.removeEventListener(event, onFullscreenEvent, true));
+            gestureEvents.forEach((event) => document.removeEventListener(event, onGesture, true));
         };
     }, []);
 
