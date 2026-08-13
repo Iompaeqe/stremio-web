@@ -43,6 +43,8 @@ const ControlBar = React.forwardRef(({
     videoScaleLabel,
     onVideoScaleChanged,
     onToggleStatisticsMenu,
+    pictureInPictureSupported,
+    onPictureInPictureRequested,
     onTouchEnd,
     ...props
 }, ref) => {
@@ -142,6 +144,23 @@ const ControlBar = React.forwardRef(({
                     />
                 </Button>
                 {
+                    /*
+                        HomeIomp: Picture-in-Picture. Rendered only where WebKit's
+                        presentation-mode API says the platform will actually do it, which in
+                        practice means iOS Safari - every desktop browser we ship to answers
+                        false and never sees this button. It sits in the main row rather than
+                        the overflow menu because the phone is the only place it appears, and
+                        it calls straight into the toggle so the presentation-mode change
+                        happens inside the tap.
+                    */
+                    pictureInPictureSupported ?
+                        <Button className={styles['control-bar-button']} title={'Picture in Picture'} tabIndex={-1} onClick={onPictureInPictureRequested}>
+                            <Icon className={styles['icon']} name={'external-player'} />
+                        </Button>
+                        :
+                        null
+                }
+                {
                     !platform.isMobile ?
                         <VolumeSlider
                             className={styles['volume-slider']}
@@ -222,6 +241,8 @@ ControlBar.propTypes = {
     onToggleSideDrawer: PropTypes.func,
     onToggleOptionsMenu: PropTypes.func,
     onToggleStatisticsMenu: PropTypes.func,
+    pictureInPictureSupported: PropTypes.bool,
+    onPictureInPictureRequested: PropTypes.func,
     onMouseOver: PropTypes.func,
     onMouseMove: PropTypes.func,
     onTouchEnd: PropTypes.func,

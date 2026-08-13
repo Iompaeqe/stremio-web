@@ -7,6 +7,7 @@ import {
     fullscreenReport,
     readAudioSessionType,
 } from 'stremio/common/audioSession';
+import { pictureInPictureReport } from 'stremio/common/pictureInPicture';
 import { Option, Section } from '../components';
 import styles from './Info.less';
 
@@ -30,6 +31,7 @@ const Info = ({ streamingServer }: Props) => {
         type: readAudioSessionType(),
         write: audioSessionWriteReport(),
         fullscreen: fullscreenReport(),
+        pictureInPicture: pictureInPictureReport(),
     }), [tick]);
 
     // Tapping the line performs the write from inside a real user gesture - the one context
@@ -84,6 +86,17 @@ const Info = ({ streamingServer }: Props) => {
             <Option label={'Last fullscreen'}>
                 <div className={styles['label']}>
                     {audioSession.fullscreen}
+                </div>
+            </Option>
+            {/*
+                "Picture in Picture" is what the platform said the last time the player asked
+                or the button was tapped: whether WebKit offers the presentation mode at all,
+                whether this is a standalone home screen app (the case Apple restricts), the
+                current presentation mode, and the refusal message if there was one.
+            */}
+            <Option label={'Picture in Picture'}>
+                <div className={styles['label']}>
+                    {audioSession.pictureInPicture}
                 </div>
             </Option>
             {

@@ -32,6 +32,7 @@ const styles = require('./styles');
 const Video = require('./Video');
 const { default: Indicator } = require('./Indicator/Indicator');
 const { default: useMediaSession } = require('./useMediaSession');
+const { isPictureInPictureSupported, recordPictureInPicture, togglePictureInPicture } = require('stremio/common/pictureInPicture');
 
 const findTrackByLang = (tracks, lang) => tracks.find((track) => track.lang === lang || langs.where('1', track.lang)?.[2] === lang);
 const findTrackById = (tracks, id) => tracks.find((track) => track.id === id);
@@ -71,11 +72,55 @@ const Player = ({ urlParams, queryParams }) => {
     const setImmersedDebounced = React.useCallback(debounce(setImmersed, 3000), []);
     const [fullscreen, , , toggleFullscreen, , setVideoElement] = useFullscreen();
 
+    // HomeIomp: the same element the fullscreen provider is given is also kept in state, so
+    // the control bar can offer Picture-in-Picture on the platforms that have it.
+    const [playerVideoElement, setPlayerVideoElement] = React.useState(null);
+
     React.useEffect(() => {
         const el = video.containerRef.current?.querySelector('video');
         setVideoElement(el || null);
-        return () => setVideoElement(null);
+        setPlayerVideoElement(el || null);
+        return () => {
+            setVideoElement(null);
+            setPlayerVideoElement(null);
+        };
     }, [video.state.manifest]);
+
+    // HomeIomp: Picture-in-Picture, iOS only (WebKit's presentation-mode API - see
+    // stremio/common/pictureInPicture). Support is re-checked on loadedmetadata because
+    // WebKit answers for a real loaded video, not an empty element, and on every
+    // presentation-mode change so the button reflects what the platform actually did. Each
+    // check is recorded for the Settings diagnostic: whether the platform allows it, and
+    // whether this is a standalone home screen app, which is the case Apple restricts.
+    const [pictureInPictureSupported, setPictureInPictureSupported] = React.useState(false);
+
+    React.useEffect(() => {
+        if (!playerVideoElement) {
+            setPictureInPictureSupported(false);
+            return;
+        }
+
+        const sync = (why) => {
+            setPictureInPictureSupported(isPictureInPictureSupported(playerVideoElement));
+            recordPictureInPicture(playerVideoElement, why);
+        };
+        const onLoadedMetadata = () => sync('loadedmetadata');
+        const onPresentationModeChanged = () => sync('presentationmodechanged');
+
+        sync('player-mount');
+        playerVideoElement.addEventListener('loadedmetadata', onLoadedMetadata);
+        playerVideoElement.addEventListener('webkitpresentationmodechanged', onPresentationModeChanged);
+        return () => {
+            playerVideoElement.removeEventListener('loadedmetadata', onLoadedMetadata);
+            playerVideoElement.removeEventListener('webkitpresentationmodechanged', onPresentationModeChanged);
+        };
+    }, [playerVideoElement]);
+
+    // Called straight from the button's onClick, so the presentation-mode change is made
+    // inside a user gesture - WebKit refuses one made anywhere else.
+    const onPictureInPictureRequested = React.useCallback(() => {
+        togglePictureInPicture(playerVideoElement);
+    }, [playerVideoElement]);
 
     const [optionsMenuOpen, , closeOptionsMenu, toggleOptionsMenu] = useBinaryState(false);
     const [subtitlesMenuOpen, , closeSubtitlesMenu, toggleSubtitlesMenu] = useBinaryState(false);
@@ -878,6 +923,8 @@ const Player = ({ urlParams, queryParams }) => {
                 onVideoScaleChanged={onVideoScaleChanged}
                 onToggleStatisticsMenu={toggleStatisticsMenu}
                 onToggleSideDrawer={toggleSideDrawer}
+                pictureInPictureSupported={pictureInPictureSupported}
+                onPictureInPictureRequested={onPictureInPictureRequested}
                 onMouseMove={onBarMouseMove}
                 onMouseOver={onBarMouseMove}
                 onTouchEnd={onContainerMouseLeave}
