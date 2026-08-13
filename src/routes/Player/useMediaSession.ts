@@ -30,9 +30,39 @@ const useMediaSession = (
     // 'playback' is the correct category for a video player and is what the platform picks
     // for one anyway, so nothing is lost by holding it. `fullscreen` stays in the signature:
     // the hook is fullscreen-aware for other reasons and callers pass it positionally.
+    //
+    // The type is asserted once on mount - before the element exists, so before the first
+    // play() and long before any fullscreen transition, which is the order WebKit wants -
+    // and then re-asserted on the media events that could plausibly disturb it. Nothing
+    // else in this app or in @stremio/stremio-video writes navigator.audioSession (checked
+    // across src/ and node_modules/), so the re-assert is belt and braces rather than a
+    // known fight; it is guarded on the current value, so in the normal case it writes
+    // nothing at all. Listeners are on document in the CAPTURE phase because none of these
+    // events bubble - capture still reaches them on the way down to the element - which
+    // also means this does not need a reference to the video element that
+    // @stremio/stremio-video creates for itself.
     useEffect(() => {
         if (!('audioSession' in navigator)) return;
-        (navigator as any).audioSession.type = 'playback';
+        const audioSession = (navigator as any).audioSession;
+        const assertPlayback = () => {
+            if (audioSession.type !== 'playback') {
+                audioSession.type = 'playback';
+            }
+        };
+        const events = [
+            'webkitbeginfullscreen',
+            'webkitendfullscreen',
+            'webkitpresentationmodechanged',
+            'loadedmetadata',
+            'play',
+            'playing',
+        ];
+
+        assertPlayback();
+        events.forEach((event) => document.addEventListener(event, assertPlayback, true));
+        return () => {
+            events.forEach((event) => document.removeEventListener(event, assertPlayback, true));
+        };
     }, []);
 
     // Playback state
