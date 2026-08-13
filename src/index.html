@@ -7,7 +7,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Stremio">
+    <meta name="theme-color" content="#2a2843">
     <link rel="icon" type="image/x-icon" href="<%= htmlWebpackPlugin.options.faviconsPath %>/favicon.ico">
+    <!-- iOS picks the home-screen icon from this tag, not from the manifest, and it will not
+         use an .ico. Relative href on purpose: the app is served under a subpath (/stremio/)
+         and every other asset here resolves the same way. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="<%= htmlWebpackPlugin.options.imagesPath %>/apple-touch-icon.png">
     <link rel="manifest" href="manifest.json" />
     <title>Stremio - Freedom to Stream</title>
     <%= htmlWebpackPlugin.tags.headTags %>
