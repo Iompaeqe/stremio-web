@@ -8,6 +8,7 @@ import {
     readAudioSessionType,
 } from 'stremio/common/audioSession';
 import { pictureInPictureReport } from 'stremio/common/pictureInPicture';
+import { tapReport } from 'stremio/common/tapDiagnostics';
 import { Option, Section } from '../components';
 import styles from './Info.less';
 
@@ -32,6 +33,7 @@ const Info = ({ streamingServer }: Props) => {
         write: audioSessionWriteReport(),
         fullscreen: fullscreenReport(),
         pictureInPicture: pictureInPictureReport(),
+        tap: tapReport(),
     }), [tick]);
 
     // Tapping the line performs the write from inside a real user gesture - the one context
@@ -97,6 +99,17 @@ const Info = ({ streamingServer }: Props) => {
             <Option label={'Picture in Picture'}>
                 <div className={styles['label']}>
                     {audioSession.pictureInPicture}
+                </div>
+            </Option>
+            {/*
+                "Player taps" is what the double-tap seek gesture saw. The count is the
+                important half: taps=0 means the handler never reached the finger at all,
+                which is a different bug entirely from every tap being classified 'first',
+                which would be a timing or geometry problem.
+            */}
+            <Option label={'Player taps'}>
+                <div className={styles['label']}>
+                    {audioSession.tap}
                 </div>
             </Option>
             {

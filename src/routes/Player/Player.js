@@ -77,14 +77,19 @@ const Player = ({ urlParams, queryParams }) => {
     // HomeIomp: the same element the fullscreen provider is given is also kept in state, so
     // the control bar can offer Picture-in-Picture on the platforms that have it.
     const [playerVideoElement, setPlayerVideoElement] = React.useState(null);
+    // The video LAYER (the element stremio-video draws into), not the <video> itself: it is
+    // the surface the double-tap seek gesture measures against and listens on.
+    const [videoLayerElement, setVideoLayerElement] = React.useState(null);
 
     React.useEffect(() => {
         const el = video.containerRef.current?.querySelector('video');
         setVideoElement(el || null);
         setPlayerVideoElement(el || null);
+        setVideoLayerElement(video.containerRef.current || null);
         return () => {
             setVideoElement(null);
             setPlayerVideoElement(null);
+            setVideoLayerElement(null);
         };
     }, [video.state.manifest]);
 
@@ -311,9 +316,10 @@ const Player = ({ urlParams, queryParams }) => {
 
     const onVideoClick = React.useCallback(() => {}, []);
 
-    // HomeIomp: double-tap the outer thirds to seek (touch only - see useDoubleTapSeek).
-    const { feedback: seekFeedback, onTouchEnd: onVideoTouchEnd, seekConsumed } = useDoubleTapSeek({
-        enabled: platform.isMobile,
+    // HomeIomp: double-tap the outer thirds to seek. Touch only, and gated on nothing else -
+    // touchend is the gate, and a mouse never fires it (see useDoubleTapSeek).
+    const { feedback: seekFeedback, seekConsumed } = useDoubleTapSeek({
+        element: videoLayerElement,
         time: video.state.time,
         duration: video.state.duration,
         step: settings.seekTimeDuration,
@@ -834,7 +840,6 @@ const Player = ({ urlParams, queryParams }) => {
                 className={styles['layer']}
                 onClick={onVideoClick}
                 onDoubleClick={onVideoDoubleClick}
-                onTouchEnd={onVideoTouchEnd}
             />
             <SeekIndicator
                 className={classnames(styles['layer'], styles['seek-indicator-layer'])}
