@@ -17,6 +17,9 @@ const styles = require('./styles');
 // bundle this fork pulls in has no key to carry them.
 const DOWNLOAD_LABEL = 'Download';
 const DOWNLOAD_SEASON_LABEL = 'Download season';
+// Prepared on the server, not on this device yet. Neutral, and still tappable: tapping is
+// how it gets fetched.
+const ON_SERVER_LABEL = 'On server';
 
 const Stream = ({ className, videoId, videoReleased, addonName, name, description, thumbnail, progress, deepLinks, stream, addon, meta, video, canDownloadSeason, ...props }) => {
     const profile = useProfile();
@@ -215,6 +218,7 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
     const downloadStateLabel = React.useMemo(() => {
         if (downloadState === null) return null;
         if (downloadState.state === 'done') return 'Downloaded';
+        if (downloadState.state === 'server') return ON_SERVER_LABEL;
         if (typeof downloadState.progress === 'number') return Math.round(downloadState.progress) + '%';
         return downloadState.state;
     }, [downloadState]);
@@ -308,7 +312,7 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                     inApp && stream ?
                         <div className={styles['download-actions']}>
                             <Button
-                                className={classnames(styles['download-button'], { [styles['download-active']]: downloadState !== null })}
+                                className={classnames(styles['download-button'], { [styles['download-active']]: downloadState !== null && downloadState.state !== 'server' })}
                                 title={downloadStateLabel !== null ? DOWNLOAD_LABEL + ' - ' + downloadStateLabel : DOWNLOAD_LABEL}
                                 tabIndex={-1}
                                 onPointerDown={downloadOnPointerDown}
@@ -336,7 +340,11 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                         :
                         null
                 }
-                <Icon className={styles['icon']} name={'play'} />
+                {
+                    // HomeIomp: inside the app the whole row is the tap target and the play
+                    // circle only costs width the description wants. In a browser it stays.
+                    inApp ? null : <Icon className={styles['icon']} name={'play'} />
+                }
                 {children}
             </Button>
         );

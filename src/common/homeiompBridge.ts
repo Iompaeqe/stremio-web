@@ -35,8 +35,13 @@ export type HomeIompAppInfo = {
 
 export type DownloadState = {
     id: string,
-    // queued | downloading | paused | done | failed, plus whatever the app invents later:
-    // an unknown state renders as a neutral badge rather than nothing.
+    // queued | downloading | paused | done | failed | server, plus whatever the app invents
+    // later: an unknown state renders as a neutral badge rather than nothing.
+    //
+    // 'server' means the episode is prepared on the server but is not on this device — the
+    // badge says so and the button stays tappable, because tapping is how it gets fetched.
+    // 'removed' is not a state: it deletes the id (see dispatch), so the row goes back to a
+    // plain Download button.
     state: string,
     progress?: number,
 };
@@ -92,6 +97,14 @@ const dispatch = (event: AppEvent): void => {
     if (event.type === 'downloadState' && Array.isArray(event.items)) {
         for (const item of event.items) {
             if (!item || typeof item.id !== 'string') continue;
+            // 'removed' is the app saying the download is gone - cancelled, deleted, reaped.
+            // The id is dropped rather than remembered as a state, so the row returns to a
+            // plain Download button instead of being stuck describing something that no
+            // longer exists. It is the only way back to "no state" the app has.
+            if (item.state === 'removed') {
+                downloadStates.delete(item.id);
+                continue;
+            }
             downloadStates.set(item.id, {
                 id: item.id,
                 state: typeof item.state === 'string' ? item.state : 'unknown',

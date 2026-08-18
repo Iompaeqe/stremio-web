@@ -187,15 +187,25 @@ new ones can be added without a web release.
 }
 ```
 
-- `state`: `queued` | `downloading` | `paused` | `done` | `failed`. An unrecognised value is shown
-  verbatim as a neutral badge rather than dropped.
-- `progress`: percent, `0`–`100`, optional.
+- `state`: `queued` | `downloading` | `paused` | `done` | `failed` | `server`, plus `removed`,
+  which is a command rather than a state. An unrecognised value is shown verbatim as a neutral
+  badge rather than dropped.
+- **`server`** means the episode is prepared on the server but is not on this device. The badge
+  says `On server`, stays in the quiet style (no accent fill), and the button remains tappable —
+  tapping is how it gets fetched.
+- **`removed`** deletes that id from the page's cache: the row goes back to a plain `Download`
+  button. It is the only way back to "no state at all", and it is what the app should push when a
+  download is cancelled, deleted or reaped.
+- `progress`: percent, `0`–`100`, optional. Ignored for `server`, which always reads `On server`
+  (the remux percentage belongs on the app's own Downloads screen, not on a stream row).
 - Items are **merged** into the page's cache by `id`, not replaced wholesale, so the app may push
   only what changed. The cache is memory-only and is lost on reload — push a full snapshot once
   after the page loads (a `didFinish` navigation callback is the natural place).
 
-A row shows `Downloaded` for `done`, `NN%` when there is a progress number, and the state string
-otherwise; the icon becomes a checkmark for `done` and a warning for `failed`.
+A row shows `Downloaded` for `done`, `On server` for `server`, `NN%` when there is a progress
+number, and the state string otherwise; the icon becomes a checkmark for `done` and a warning for
+`failed`. Inside the app the row's trailing play circle is not drawn — the whole row is the tap
+target and the description wants the width — while a browser keeps it.
 
 ### Subscribing from page code
 
