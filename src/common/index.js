@@ -9,7 +9,7 @@ const { ShortcutsProvider, useShortcuts, onShortcut } = require('./Shortcuts');
 const CONSTANTS = require('./CONSTANTS');
 const { withCoreSuspender, useCoreSuspender } = require('./CoreSuspender');
 const getVisibleChildrenRange = require('./getVisibleChildrenRange');
-const { isHomeIompApp, homeIompAppInfo, postToApp, onAppEvent, useDownloadState, downloadItemId, buildDownloadPayload } = require('./homeiompBridge');
+const { isHomeIompApp, homeIompAppInfo, postToApp, onAppEvent, useDownloadState, downloadItemId, buildDownloadPayload, subtitleAddons, fetchEnglishSubtitles } = require('./homeiompBridge');
 const interfaceLanguages = require('./interfaceLanguages.json');
 const languageNames = require('./languageNames.json');
 const languages = require('./languages');
@@ -56,6 +56,8 @@ module.exports = {
     useDownloadState,
     downloadItemId,
     buildDownloadPayload,
+    subtitleAddons,
+    fetchEnglishSubtitles,
     interfaceLanguages,
     languageNames,
     languages,

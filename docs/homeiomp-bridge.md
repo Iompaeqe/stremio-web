@@ -92,7 +92,14 @@ Posted by the Download / Download season action on a stream row.
     "transportUrl": "https://torrentio.strem.fun/manifest.json",
     "name": "Torrentio"
   },
-  "subtitles": [{ "lang": "eng", "url": "https://.../sub.srt" }]
+  "subtitles": [
+    { "lang": "eng", "url": "https://opensubtitles.../1.srt", "source": "OpenSubtitles v3" },
+    { "lang": "eng", "url": "https://opensubtitles.../2.srt", "source": "OpenSubtitles v3" }
+  ],
+  "addons": [
+    { "transportUrl": "https://opensubtitles-v3.strem.io/manifest.json", "name": "OpenSubtitles v3" },
+    { "transportUrl": "https://subs.example/manifest.json", "name": "Some Subs" }
+  ]
 }
 ```
 
@@ -122,9 +129,20 @@ Field notes, all of them load-bearing:
 - **`stream.behaviorHints`** is passed through untouched (`bingeGroup`, `filename`, `videoSize`,
   `notWebReady`, `countryWhitelist`, `proxyHeaders`, …). `filename`/`videoSize` are the useful
   ones for naming and sizing a download.
-- **`subtitles`** is only what the stream itself carried (`[{ lang, url }]`), which is usually
-  empty. Addon-provided subtitle tracks are a separate `subtitles` resource that only the player
-  route requests; fetching them here would mean a request per row, so it is left to the app.
+- **`subtitles`** is up to **five English subtitle files**, `[{ lang, url, source }]`, resolved
+  **on the tap** and never on render. The stream's own `subtitles` come first (they were
+  authored against this exact release, so they are the most likely to be in sync), then every
+  installed addon that declares the `subtitles` resource is asked
+  `<transportUrl minus manifest.json>subtitles/<type>/<videoId>.json` — in install order, so
+  OpenSubtitles wins the top slots when it is installed. Each request gets **4 s** and any
+  failure (down, slow, CORS) contributes nothing rather than stopping the download. English is
+  `en` / `eng` / `english`, case-insensitive, region suffixes ignored. Duplicated URLs are
+  dropped. `source` is the addon's name, carried only so a human can tell one track from
+  another. The list is often empty, and that is not an error.
+- **`addons`** is the same subtitle-capable addon list (`[{ transportUrl, name }]`, at most 8),
+  sent so the app can ask the identical question per episode when it resolves the rest of a
+  season. The page resolves subtitles for the tapped video only; it deliberately does not walk
+  a season itself.
 - **`released`** values are ISO strings (the core hands the page real `Date` objects; the bridge
   converts them). Missing dates are `null`, never `Invalid Date`.
 - **`meta`**, **`video`** and **`addon`** are `null` rather than absent when unknown.
@@ -192,7 +210,7 @@ const state = useDownloadState(id);   // React hook, re-renders only when that i
 
 | File | What it does |
 | --- | --- |
-| `src/common/homeiompBridge.ts` | The whole bridge: detection, `postToApp`, the event emitter, `downloadItemId`, `buildDownloadPayload`, `useDownloadState`. |
+| `src/common/homeiompBridge.ts` | The whole bridge: detection, `postToApp`, the event emitter, `downloadItemId`, `buildDownloadPayload`, `useDownloadState`, and the subtitle resolver (`subtitleAddons`, `subtitlesResourceUrl`, `fetchEnglishSubtitles`). |
 | `src/common/index.js` | Re-exports the bridge from `stremio/common`. |
 | `src/routes/MetaDetails/MetaDetails.js` | Passes the loaded meta (`metaItem`) down to the streams list. |
 | `src/routes/MetaDetails/StreamsList/StreamsList.js` | Keeps each stream's addon on the stream, decides whether a season can be downloaded, passes meta/video/stream/addon to each row. |
@@ -237,6 +255,11 @@ window.webkit.messageHandlers.homeiomp = {
 };
 location.reload();   // the marker is read at render time; reload so every row sees it
 ```
+
+A tap now makes one request per installed subtitle addon before the message is posted, so the
+message arrives up to four seconds after the click and the network tab shows the
+`subtitles/<type>/<videoId>.json` calls. With no subtitle addon installed there are no requests
+and `subtitles` is whatever the stream itself carried.
 
 Then inspect what a tap produced:
 

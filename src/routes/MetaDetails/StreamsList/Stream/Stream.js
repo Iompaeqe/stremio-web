@@ -6,7 +6,7 @@ const classnames = require('classnames');
 const { default: Icon } = require('@stremio/stremio-icons/react');
 const { t } = require('i18next');
 const { useCore } = require('stremio/core');
-const { useProfile, usePlatform, useToast, useBinaryState, isHomeIompApp, postToApp, downloadItemId, buildDownloadPayload, useDownloadState } = require('stremio/common');
+const { useProfile, usePlatform, useToast, useBinaryState, isHomeIompApp, postToApp, downloadItemId, buildDownloadPayload, useDownloadState, subtitleAddons, fetchEnglishSubtitles } = require('stremio/common');
 const { Button, Image, Popup } = require('stremio/components');
 const { useRouteFocused } = require('stremio-router');
 const StreamPlaceholder = require('./StreamPlaceholder');
@@ -223,12 +223,24 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
         if (downloadState?.state === 'failed') return 'warning';
         return 'download';
     }, [downloadState]);
-    const sendDownload = React.useCallback((scope) => {
-        if (!stream) {
+    // Subtitles ride along with the download, and they are resolved HERE - on the tap - not
+    // per row: asking every installed subtitle addon is one request each, and a stream list is
+    // dozens of rows. The extra wait is capped inside fetchEnglishSubtitles, and an addon that
+    // never answers costs the download nothing but that wait.
+    const sending = React.useRef(false);
+    const sendDownload = React.useCallback(async (scope) => {
+        if (!stream || sending.current) {
             return;
         }
 
-        const sent = postToApp('download', buildDownloadPayload({ scope, meta, video, stream, addon }));
+        sending.current = true;
+        const addons = subtitleAddons(profile?.addons);
+        const subtitles = await fetchEnglishSubtitles(addons, {
+            type: meta?.type,
+            videoId: video?.id ?? videoId ?? meta?.id
+        });
+        const sent = postToApp('download', buildDownloadPayload({ scope, meta, video, stream, addon, subtitles, addons }));
+        sending.current = false;
         toast.show({
             type: sent ? 'success' : 'error',
             title: sent ?
@@ -237,7 +249,7 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                 'The app did not take this download',
             timeout: 4000
         });
-    }, [stream, addon, meta, video]);
+    }, [stream, addon, meta, video, videoId, profile]);
     // A tap on a nested action must not also open the row: the row is an anchor to the
     // player, and the popup label toggles its menu on long press.
     const downloadOnPointerDown = React.useCallback((event) => {

@@ -217,7 +217,9 @@ type CoreMeta = {
 
 type CoreAddon = {
     transportUrl?: string,
-    manifest?: { name?: string },
+    // resources is either ['subtitles', 'stream'] or [{ name: 'subtitles', types, idPrefixes }],
+    // and the same collection really does contain both shapes.
+    manifest?: { name?: string, resources?: any[] },
     [key: string]: any,
 };
 
@@ -241,16 +243,154 @@ export const downloadItemId = (videoId: string | null | undefined, stream: CoreS
 
 export type DownloadScope = 'episode' | 'season';
 
+// One subtitle file the app may fetch and mux into the download. `source` is the addon that
+// offered it, kept only so a human reading the app's list can tell OpenSubtitles from the
+// release's own track.
+export type DownloadSubtitle = {
+    lang: string | null,
+    url: string,
+    source: string | null,
+};
+
+// A subtitle-capable addon, reduced to what the app needs to ask it the same question for the
+// other episodes of a season.
+export type SubtitleAddon = {
+    transportUrl: string,
+    name: string | null,
+};
+
+// Subtitles are small - a season of them is a rounding error against one 2 GB episode - so a
+// handful travel with every download. Five is the owner's "top 3-5", and it is also about as
+// many as anyone scrolls through in a player's subtitle menu.
+export const MAX_DOWNLOAD_SUBTITLES = 5;
+// A download must not wait on somebody else's free public addon. Four seconds is long enough
+// for a warm OpenSubtitles and short enough that a dead addon is not felt as a broken button.
+const SUBTITLE_FETCH_TIMEOUT_MS = 4000;
+// A collection with thirty subtitle addons in it would otherwise mean thirty requests per tap.
+const MAX_SUBTITLE_ADDONS = 8;
+
+const ENGLISH_TAGS = new Set(['en', 'eng', 'english']);
+
+// Addons tag English as 'en', 'eng', 'English' and occasionally 'en-US'; ISO-639-2 and the
+// bare name are both in the wild, so all of them are accepted and nothing else is.
+const isEnglish = (lang: unknown): boolean => {
+    if (typeof lang !== 'string') return false;
+    const value = lang.trim().toLowerCase();
+    return ENGLISH_TAGS.has(value) || ENGLISH_TAGS.has(value.split(/[-_]/)[0]);
+};
+
+const declaresSubtitles = (addon: CoreAddon | null | undefined): boolean => {
+    const resources = addon?.manifest?.resources;
+    if (!Array.isArray(resources)) return false;
+    return resources.some((resource: any) => (
+        typeof resource === 'string' ?
+            resource === 'subtitles'
+            :
+            resource !== null && typeof resource === 'object' && resource.name === 'subtitles'
+    ));
+};
+
+// Every installed addon that says it serves subtitles, in the order the user installed them -
+// which is the order they are asked in, so OpenSubtitles comes first when it is present.
+export const subtitleAddons = (addons: CoreAddon[] | null | undefined): SubtitleAddon[] => {
+    if (!Array.isArray(addons)) return [];
+    return addons
+        .filter((addon) => typeof addon?.transportUrl === 'string' && addon.transportUrl.length > 0 && declaresSubtitles(addon))
+        .slice(0, MAX_SUBTITLE_ADDONS)
+        .map((addon) => ({
+            transportUrl: addon.transportUrl as string,
+            name: asText(addon.manifest?.name),
+        }));
+};
+
+// 'https://opensubtitles.strem.io/manifest.json' -> '.../subtitles/series/tt0944947%3A1%3A1.json'.
+// A configured addon carries its settings in the path, which is why the manifest filename is
+// stripped rather than the host being rebuilt.
+export const subtitlesResourceUrl = (transportUrl: string, type: string, videoId: string): string => {
+    const base = transportUrl.trim().replace(/manifest\.json$/, '');
+    const root = base.endsWith('/') ? base : base + '/';
+    return root + 'subtitles/' + encodeURIComponent(type) + '/' + encodeURIComponent(videoId) + '.json';
+};
+
+const dedupeSubtitles = (subtitles: DownloadSubtitle[]): DownloadSubtitle[] => {
+    const seen = new Set<string>();
+    const kept: DownloadSubtitle[] = [];
+    for (const subtitle of subtitles) {
+        if (!subtitle || typeof subtitle.url !== 'string' || subtitle.url.length === 0) continue;
+        if (seen.has(subtitle.url)) continue;
+        seen.add(subtitle.url);
+        kept.push(subtitle);
+        if (kept.length >= MAX_DOWNLOAD_SUBTITLES) break;
+    }
+    return kept;
+};
+
+const fetchAddonSubtitles = async (addon: SubtitleAddon, type: string, videoId: string): Promise<DownloadSubtitle[]> => {
+    if (typeof fetch !== 'function') return [];
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller !== null ? setTimeout(() => controller.abort(), SUBTITLE_FETCH_TIMEOUT_MS) : null;
+    try {
+        const response = await fetch(subtitlesResourceUrl(addon.transportUrl, type, videoId), {
+            headers: { accept: 'application/json' },
+            signal: controller !== null ? controller.signal : undefined,
+        });
+        if (!response.ok) return [];
+        const body: any = await response.json();
+        const offered: any[] = Array.isArray(body?.subtitles) ? body.subtitles : [];
+        return offered
+            .filter((subtitle: any) => subtitle && typeof subtitle.url === 'string' && subtitle.url.length > 0 && isEnglish(subtitle.lang))
+            .map((subtitle: any) => ({
+                lang: asText(subtitle.lang),
+                url: subtitle.url as string,
+                source: addon.name,
+            }));
+    } catch {
+        // An addon that is slow, down, or refuses the page's origin must never stop a
+        // download: the episode is the point, the subtitles are a bonus.
+        return [];
+    } finally {
+        if (timer !== null) clearTimeout(timer);
+    }
+};
+
+// Ask every subtitle-capable addon for this video and keep the first few English tracks.
+//
+// Called ONLY when the user taps Download, never on render: this is one request per installed
+// subtitle addon, and a stream list is dozens of rows. Never rejects - a failed addon
+// contributes nothing and the download goes ahead without it.
+export const fetchEnglishSubtitles = async (
+    addons: SubtitleAddon[],
+    { type, videoId }: { type: string | null | undefined, videoId: string | null | undefined },
+): Promise<DownloadSubtitle[]> => {
+    if (!Array.isArray(addons) || addons.length === 0) return [];
+    if (typeof videoId !== 'string' || videoId.length === 0) return [];
+    const resourceType = typeof type === 'string' && type.length > 0 ? type : 'series';
+    try {
+        const answers = await Promise.all(
+            addons.map((addon) => fetchAddonSubtitles(addon, resourceType, videoId))
+        );
+        // Addon order is preserved by concatenating in order, so the first installed addon
+        // that has English wins the top slots.
+        return dedupeSubtitles(([] as DownloadSubtitle[]).concat(...answers));
+    } catch {
+        return [];
+    }
+};
+
 // Build the payload for a 'download' message. Deliberately lossy: it carries what the app
 // needs to fetch and file the video, not the core's whole model. A stream with no infoHash
 // (a direct url, a YouTube id, an external link) is posted all the same with infoHash null -
 // deciding what it can do with that is the app's job, not this UI's.
-export const buildDownloadPayload = ({ scope, meta, video, stream, addon }: {
+export const buildDownloadPayload = ({ scope, meta, video, stream, addon, subtitles, addons }: {
     scope: DownloadScope,
     meta: CoreMeta | null,
     video: CoreVideo | null,
     stream: CoreStream,
     addon: CoreAddon | null,
+    // Already resolved by the caller (fetchEnglishSubtitles) - this function stays synchronous
+    // and free of I/O so it can still be reasoned about from a test or a console.
+    subtitles?: DownloadSubtitle[],
+    addons?: SubtitleAddon[],
 }): Record<string, any> => ({
     scope,
     id: downloadItemId(video?.id ?? meta?.id, stream),
@@ -295,10 +435,22 @@ export const buildDownloadPayload = ({ scope, meta, video, stream, addon }: {
         transportUrl: asText(addon.transportUrl),
         name: asText(addon.manifest?.name),
     } : null,
-    subtitles: Array.isArray(stream.subtitles) ?
-        stream.subtitles
-            .filter((subtitle) => subtitle && typeof subtitle.url === 'string')
-            .map((subtitle) => ({ lang: asText(subtitle.lang), url: subtitle.url as string }))
-        :
-        [],
+    // The stream's own subtitles first - they were authored against this exact release, so
+    // they are the ones most likely to be in sync - then whatever the addons offered.
+    subtitles: dedupeSubtitles([
+        ...(Array.isArray(stream.subtitles) ?
+            stream.subtitles
+                .filter((subtitle) => subtitle && typeof subtitle.url === 'string')
+                .map((subtitle) => ({
+                    lang: asText(subtitle.lang),
+                    url: subtitle.url as string,
+                    source: asText(addon?.manifest?.name),
+                }))
+            :
+            []),
+        ...(Array.isArray(subtitles) ? subtitles : []),
+    ]),
+    // Every subtitle-capable addon, so the app can ask the same question per episode when it
+    // resolves the rest of a season. The page deliberately does not walk a season itself.
+    addons: Array.isArray(addons) ? addons : [],
 });
