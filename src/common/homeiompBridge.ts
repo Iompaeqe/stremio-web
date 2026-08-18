@@ -35,11 +35,10 @@ export type HomeIompAppInfo = {
 
 export type DownloadState = {
     id: string,
-    // queued | downloading | paused | done | failed | server, plus whatever the app invents
-    // later: an unknown state renders as a neutral badge rather than nothing.
+    // queued | downloading | paused | done | failed. The row draws exactly those and nothing
+    // else: a state this page does not know shows NO badge rather than putting the app's
+    // internal vocabulary on a stream row.
     //
-    // 'server' means the episode is prepared on the server but is not on this device — the
-    // badge says so and the button stays tappable, because tapping is how it gets fetched.
     // 'removed' is not a state: it deletes the id (see dispatch), so the row goes back to a
     // plain Download button.
     state: string,

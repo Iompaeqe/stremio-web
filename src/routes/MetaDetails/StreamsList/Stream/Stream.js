@@ -17,9 +17,14 @@ const styles = require('./styles');
 // bundle this fork pulls in has no key to carry them.
 const DOWNLOAD_LABEL = 'Download';
 const DOWNLOAD_SEASON_LABEL = 'Download season';
-// Prepared on the server, not on this device yet. Neutral, and still tappable: tapping is
-// how it gets fetched.
-const ON_SERVER_LABEL = 'On server';
+// The whole vocabulary of the badge. The owner asked for three marks - queued, downloading
+// with a percentage, downloaded - and paused/failed cost nothing to add. Anything else the
+// app invents later shows NO badge rather than leaking a raw state string onto the row.
+const QUEUED_LABEL = 'Queued';
+const DOWNLOADING_LABEL = 'Downloading';
+const PAUSED_LABEL = 'Paused';
+const FAILED_LABEL = 'Failed';
+const DOWNLOADED_LABEL = 'Downloaded';
 
 const Stream = ({ className, videoId, videoReleased, addonName, name, description, thumbnail, progress, deepLinks, stream, addon, meta, video, canDownloadSeason, ...props }) => {
     const profile = useProfile();
@@ -217,10 +222,17 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
     const downloadState = useDownloadState(downloadId);
     const downloadStateLabel = React.useMemo(() => {
         if (downloadState === null) return null;
-        if (downloadState.state === 'done') return 'Downloaded';
-        if (downloadState.state === 'server') return ON_SERVER_LABEL;
-        if (typeof downloadState.progress === 'number') return Math.round(downloadState.progress) + '%';
-        return downloadState.state;
+        const percent = typeof downloadState.progress === 'number' ? Math.round(downloadState.progress) + '%' : null;
+        switch (downloadState.state) {
+            case 'queued': return QUEUED_LABEL;
+            case 'downloading': return percent !== null ? percent : DOWNLOADING_LABEL;
+            case 'paused': return percent !== null ? PAUSED_LABEL + ' ' + percent : PAUSED_LABEL;
+            case 'failed': return FAILED_LABEL;
+            case 'done': return DOWNLOADED_LABEL;
+            // Not a state this page knows how to draw. Saying nothing is better than
+            // showing the app's internal vocabulary on a stream row.
+            default: return null;
+        }
     }, [downloadState]);
     const downloadIconName = React.useMemo(() => {
         if (downloadState?.state === 'done') return 'checkmark';
@@ -312,7 +324,7 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                     inApp && stream ?
                         <div className={styles['download-actions']}>
                             <Button
-                                className={classnames(styles['download-button'], { [styles['download-active']]: downloadState !== null && downloadState.state !== 'server' })}
+                                className={classnames(styles['download-button'], { [styles['download-active']]: downloadStateLabel !== null })}
                                 title={downloadStateLabel !== null ? DOWNLOAD_LABEL + ' - ' + downloadStateLabel : DOWNLOAD_LABEL}
                                 tabIndex={-1}
                                 onPointerDown={downloadOnPointerDown}
