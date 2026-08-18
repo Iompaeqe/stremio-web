@@ -112,6 +112,53 @@
         background-color: var(--secondary-accent-color);
     }
 
+    // HomeIomp: the download actions, rendered only inside the native app. Unlike the play
+    // circle they are always visible - the app is a phone, where there is no hover to reveal
+    // anything - and they are deliberately quieter than the accent-coloured play circle.
+    .download-actions {
+        flex: none;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.5rem;
+
+        .download-button {
+            flex: none;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 0.4rem;
+            height: 3rem;
+            padding: 0 0.8rem;
+            border-radius: 1.5rem;
+            color: var(--primary-foreground-color);
+            background-color: var(--overlay-color);
+
+            &:hover, &:focus {
+                background-color: var(--secondary-accent-color);
+            }
+
+            &.download-active {
+                background-color: var(--secondary-accent-color);
+            }
+
+            .download-icon {
+                flex: none;
+                width: 1.6rem;
+                height: 1.6rem;
+                color: var(--primary-foreground-color);
+            }
+
+            .download-label {
+                flex: none;
+                font-size: 0.9rem;
+                font-weight: 500;
+                white-space: nowrap;
+                color: var(--primary-foreground-color);
+            }
+        }
+    }
+
     .menu-icon {
         flex: none;
         width: 1.7rem;

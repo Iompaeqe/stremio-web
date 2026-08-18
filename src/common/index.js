@@ -9,6 +9,7 @@ const { ShortcutsProvider, useShortcuts, onShortcut } = require('./Shortcuts');
 const CONSTANTS = require('./CONSTANTS');
 const { withCoreSuspender, useCoreSuspender } = require('./CoreSuspender');
 const getVisibleChildrenRange = require('./getVisibleChildrenRange');
+const { isHomeIompApp, homeIompAppInfo, postToApp, onAppEvent, useDownloadState, downloadItemId, buildDownloadPayload } = require('./homeiompBridge');
 const interfaceLanguages = require('./interfaceLanguages.json');
 const languageNames = require('./languageNames.json');
 const languages = require('./languages');
@@ -48,6 +49,13 @@ module.exports = {
     withCoreSuspender,
     useCoreSuspender,
     getVisibleChildrenRange,
+    isHomeIompApp,
+    homeIompAppInfo,
+    postToApp,
+    onAppEvent,
+    useDownloadState,
+    downloadItemId,
+    buildDownloadPayload,
     interfaceLanguages,
     languageNames,
     languages,

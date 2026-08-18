@@ -14,7 +14,7 @@ const { default: SeasonEpisodePicker } = require('../EpisodePicker');
 
 const ALL_ADDONS_KEY = 'ALL';
 
-const StreamsList = ({ className, video, type, onEpisodeSearch, ...props }) => {
+const StreamsList = ({ className, video, type, metaItem, onEpisodeSearch, ...props }) => {
     const { t } = useTranslation();
     const core = useCore();
     const platform = usePlatform();
@@ -59,7 +59,11 @@ const StreamsList = ({ className, video, type, onEpisodeSearch, ...props }) => {
                                 }
                             });
                         },
-                        addonName: streams.addon.manifest.name
+                        addonName: streams.addon.manifest.name,
+                        // HomeIomp: the addon a stream came from, kept on the stream so the
+                        // download bridge can tell the app where to resolve the rest of a
+                        // season from. Unused outside the native app.
+                        addon: streams.addon
                     }))
                 };
 
@@ -93,6 +97,15 @@ const StreamsList = ({ className, video, type, onEpisodeSearch, ...props }) => {
             onSelect: onAddonSelected
         };
     }, [streamsByAddon, selectedAddon]);
+
+    // HomeIomp: "Download season" is offered only where a season exists to download - a
+    // series meta whose episode list the app can walk through the same addon.
+    const canDownloadSeason = React.useMemo(() => {
+        return type === 'series' &&
+            typeof video?.season === 'number' &&
+            Array.isArray(metaItem?.videos) &&
+            metaItem.videos.length > 0;
+    }, [type, video, metaItem]);
 
     const handleEpisodePicker = React.useCallback((season, episode) => {
         onEpisodeSearch(season, episode);
@@ -182,6 +195,11 @@ const StreamsList = ({ className, video, type, onEpisodeSearch, ...props }) => {
                                             thumbnail={stream.thumbnail}
                                             progress={stream.progress}
                                             deepLinks={stream.deepLinks}
+                                            stream={stream}
+                                            addon={stream.addon}
+                                            meta={metaItem}
+                                            video={video}
+                                            canDownloadSeason={canDownloadSeason}
                                             onClick={stream.onClick}
                                         />
                                     ))}
@@ -217,6 +235,9 @@ StreamsList.propTypes = {
     streams: PropTypes.arrayOf(PropTypes.object).isRequired,
     video: PropTypes.object,
     type: PropTypes.string,
+    // HomeIomp: the loaded meta, needed only so the download bridge can hand the app the
+    // whole episode list when a season is asked for.
+    metaItem: PropTypes.object,
     onEpisodeSearch: PropTypes.func
 };
 

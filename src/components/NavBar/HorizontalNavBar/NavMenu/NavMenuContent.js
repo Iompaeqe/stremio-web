@@ -14,7 +14,12 @@ const { default: usePlayUrl } = require('stremio/common/usePlayUrl');
 const useToast = require('stremio/common/Toast/useToast');
 const { withCoreSuspender } = require('stremio/common/CoreSuspender');
 const useStreamingServer = require('stremio/common/useStreamingServer');
+const { isHomeIompApp, postToApp } = require('stremio/common/homeiompBridge');
 const styles = require('./styles');
+
+// HomeIomp: the app-only Downloads entry. A constant rather than a translation key on
+// purpose - it never reaches a browser, and the upstream translation bundle has no key for it.
+const DOWNLOADS_LABEL = 'Downloads';
 
 const NavMenuContent = ({ onClick }) => {
     const { t } = useTranslation();
@@ -54,6 +59,12 @@ const NavMenuContent = ({ onClick }) => {
             console.error(e);
         }
     }, [handlePlayUrl]);
+    // HomeIomp: only the native app has a Downloads screen to switch to, so this entry
+    // exists only there; in a browser isHomeIompApp() is false and the menu is unchanged.
+    const inApp = React.useMemo(() => isHomeIompApp(), []);
+    const onDownloadsClick = React.useCallback(() => {
+        postToApp('openDownloads');
+    }, []);
     return (
         <div className={classnames(styles['nav-menu-container'], 'animation-fade-in', { [styles['with-warning']]: !streamingServerWarningDismissed } )} onClick={onClick}>
             <div className={styles['user-info-container']}>
@@ -90,6 +101,15 @@ const NavMenuContent = ({ onClick }) => {
                     null
             }
             <div className={styles['nav-menu-section']}>
+                {
+                    inApp ?
+                        <Button className={styles['nav-menu-option-container']} title={DOWNLOADS_LABEL} onClick={onDownloadsClick}>
+                            <Icon className={styles['icon']} name={'download'} />
+                            <div className={styles['nav-menu-option-label']}>{DOWNLOADS_LABEL}</div>
+                        </Button>
+                        :
+                        null
+                }
                 <Button className={styles['nav-menu-option-container']} title={ t('SETTINGS') } href={'#/settings'}>
                     <Icon className={styles['icon']} name={'settings'} />
                     <div className={styles['nav-menu-option-label']}>{ t('SETTINGS') }</div>

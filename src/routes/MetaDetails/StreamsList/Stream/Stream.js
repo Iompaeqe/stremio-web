@@ -6,13 +6,19 @@ const classnames = require('classnames');
 const { default: Icon } = require('@stremio/stremio-icons/react');
 const { t } = require('i18next');
 const { useCore } = require('stremio/core');
-const { useProfile, usePlatform, useToast, useBinaryState } = require('stremio/common');
+const { useProfile, usePlatform, useToast, useBinaryState, isHomeIompApp, postToApp, downloadItemId, buildDownloadPayload, useDownloadState } = require('stremio/common');
 const { Button, Image, Popup } = require('stremio/components');
 const { useRouteFocused } = require('stremio-router');
 const StreamPlaceholder = require('./StreamPlaceholder');
 const styles = require('./styles');
 
-const Stream = ({ className, videoId, videoReleased, addonName, name, description, thumbnail, progress, deepLinks, ...props }) => {
+// HomeIomp: labels for the app-only download actions. They are constants rather than
+// translation keys on purpose - they never reach a browser, and the upstream translation
+// bundle this fork pulls in has no key to carry them.
+const DOWNLOAD_LABEL = 'Download';
+const DOWNLOAD_SEASON_LABEL = 'Download season';
+
+const Stream = ({ className, videoId, videoReleased, addonName, name, description, thumbnail, progress, deepLinks, stream, addon, meta, video, canDownloadSeason, ...props }) => {
     const profile = useProfile();
     const toast = useToast();
     const platform = usePlatform();
@@ -194,6 +200,64 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
         }
     }, [streamLink]);
 
+    /*
+        HomeIomp: the download bridge. isHomeIompApp() is false in every browser we ship to,
+        so everything below collapses to null there and the row stays byte-identical - the
+        actions exist only inside the native iOS app, which is the only thing that can hold a
+        downloaded file. The row posts what it knows (meta, video, stream, addon) and lets the
+        app decide what to do with it; a stream with no infoHash is posted all the same.
+    */
+    const inApp = React.useMemo(() => isHomeIompApp(), []);
+    const downloadId = React.useMemo(() => (
+        inApp && stream ? downloadItemId(video?.id ?? videoId ?? meta?.id, stream) : null
+    ), [inApp, stream, video, videoId, meta]);
+    const downloadState = useDownloadState(downloadId);
+    const downloadStateLabel = React.useMemo(() => {
+        if (downloadState === null) return null;
+        if (downloadState.state === 'done') return 'Downloaded';
+        if (typeof downloadState.progress === 'number') return Math.round(downloadState.progress) + '%';
+        return downloadState.state;
+    }, [downloadState]);
+    const downloadIconName = React.useMemo(() => {
+        if (downloadState?.state === 'done') return 'checkmark';
+        if (downloadState?.state === 'failed') return 'warning';
+        return 'download';
+    }, [downloadState]);
+    const sendDownload = React.useCallback((scope) => {
+        if (!stream) {
+            return;
+        }
+
+        const sent = postToApp('download', buildDownloadPayload({ scope, meta, video, stream, addon }));
+        toast.show({
+            type: sent ? 'success' : 'error',
+            title: sent ?
+                scope === 'season' ? 'Season sent to Downloads' : 'Sent to Downloads'
+                :
+                'The app did not take this download',
+            timeout: 4000
+        });
+    }, [stream, addon, meta, video]);
+    // A tap on a nested action must not also open the row: the row is an anchor to the
+    // player, and the popup label toggles its menu on long press.
+    const downloadOnPointerDown = React.useCallback((event) => {
+        event.nativeEvent.togglePopupPrevented = true;
+    }, []);
+    const downloadOnClick = React.useCallback((event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.togglePopupPrevented = true;
+        closeMenu();
+        sendDownload('episode');
+    }, [sendDownload]);
+    const downloadSeasonOnClick = React.useCallback((event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.togglePopupPrevented = true;
+        closeMenu();
+        sendDownload('season');
+    }, [sendDownload]);
+
     const renderThumbnailFallback = React.useCallback(() => (
         <Icon className={styles['placeholder-icon']} name={'ic_broken_link'} />
     ), []);
@@ -228,11 +292,47 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                     }
                 </div>
                 <div className={styles['description-container']} title={description}>{description}</div>
+                {
+                    inApp && stream ?
+                        <div className={styles['download-actions']}>
+                            <Button
+                                className={classnames(styles['download-button'], { [styles['download-active']]: downloadState !== null })}
+                                title={downloadStateLabel !== null ? DOWNLOAD_LABEL + ' - ' + downloadStateLabel : DOWNLOAD_LABEL}
+                                tabIndex={-1}
+                                onPointerDown={downloadOnPointerDown}
+                                onClick={downloadOnClick}
+                            >
+                                <Icon className={styles['download-icon']} name={downloadIconName} />
+                                {
+                                    downloadStateLabel !== null ?
+                                        <div className={styles['download-label']}>{downloadStateLabel}</div>
+                                        :
+                                        null
+                                }
+                            </Button>
+                            {
+                                canDownloadSeason ?
+                                    <Button
+                                        className={styles['download-button']}
+                                        title={DOWNLOAD_SEASON_LABEL}
+                                        tabIndex={-1}
+                                        onPointerDown={downloadOnPointerDown}
+                                        onClick={downloadSeasonOnClick}
+                                    >
+                                        <Icon className={styles['download-icon']} name={'episodes'} />
+                                    </Button>
+                                    :
+                                    null
+                            }
+                        </div>
+                        :
+                        null
+                }
                 <Icon className={styles['icon']} name={'play'} />
                 {children}
             </Button>
         );
-    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick]);
+    }, [thumbnail, progress, addonName, name, description, href, target, download, onClick, inApp, stream, canDownloadSeason, downloadState, downloadStateLabel, downloadIconName, downloadOnClick, downloadSeasonOnClick]);
 
     const renderMenu = React.useMemo(() => function renderMenu() {
         return (
@@ -244,6 +344,29 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                     <Icon className={styles['menu-icon']} name={'play'} />
                     <div className={styles['context-menu-option-label']}>{t('CTX_PLAY')}</div>
                 </Button>
+                {
+                    // HomeIomp: the same two actions as the row, for the long-press menu.
+                    inApp && stream ?
+                        <React.Fragment>
+                            <Button className={styles['context-menu-option-container']} title={DOWNLOAD_LABEL} onClick={downloadOnClick}>
+                                <Icon className={styles['menu-icon']} name={downloadIconName} />
+                                <div className={styles['context-menu-option-label']}>
+                                    {downloadStateLabel !== null ? DOWNLOAD_LABEL + ' (' + downloadStateLabel + ')' : DOWNLOAD_LABEL}
+                                </div>
+                            </Button>
+                            {
+                                canDownloadSeason ?
+                                    <Button className={styles['context-menu-option-container']} title={DOWNLOAD_SEASON_LABEL} onClick={downloadSeasonOnClick}>
+                                        <Icon className={styles['menu-icon']} name={'episodes'} />
+                                        <div className={styles['context-menu-option-label']}>{DOWNLOAD_SEASON_LABEL}</div>
+                                    </Button>
+                                    :
+                                    null
+                            }
+                        </React.Fragment>
+                        :
+                        null
+                }
                 {
                     streamLink &&
                         <Button className={styles['context-menu-option-container']} title={t('CTX_COPY_STREAM_LINK')} onClick={copyStreamLink}>
@@ -267,7 +390,7 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                 }
             </div>
         );
-    }, [copyStreamLink, onClick]);
+    }, [copyStreamLink, onClick, inApp, stream, canDownloadSeason, downloadStateLabel, downloadIconName, downloadOnClick, downloadSeasonOnClick]);
 
     React.useEffect(() => {
         if (!routeFocused) {
@@ -318,6 +441,13 @@ Stream.propTypes = {
             })
         })
     }),
+    // HomeIomp: the raw core objects the download bridge posts to the native app. They are
+    // read only when the app is hosting the page; in a browser they are ignored.
+    stream: PropTypes.object,
+    addon: PropTypes.object,
+    meta: PropTypes.object,
+    video: PropTypes.object,
+    canDownloadSeason: PropTypes.bool,
     onClick: PropTypes.func
 };
 

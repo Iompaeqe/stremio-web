@@ -28,6 +28,14 @@ const MetaDetails = ({ urlParams, queryParams }) => {
             :
             [null, null];
     }, [metaDetails.selected]);
+    // HomeIomp: the loaded meta itself, handed to the streams list so its download actions
+    // can tell the native app which item - and, for a season, which episodes - to fetch.
+    const metaContent = React.useMemo(() => {
+        return metaDetails.metaItem !== null && metaDetails.metaItem.content.type === 'Ready' ?
+            metaDetails.metaItem.content.content
+            :
+            null;
+    }, [metaDetails.metaItem]);
     const video = React.useMemo(() => {
         return streamPath !== null && metaDetails.metaItem !== null && metaDetails.metaItem.content.type === 'Ready' ?
             metaDetails.metaItem.content.content.videos.reduce((result, video) => {
@@ -203,6 +211,7 @@ const MetaDetails = ({ urlParams, queryParams }) => {
                             streams={metaDetails.streams}
                             video={video}
                             type={streamPath.type}
+                            metaItem={metaContent}
                             onEpisodeSearch={handleEpisodeSearch}
                         />
                         :
