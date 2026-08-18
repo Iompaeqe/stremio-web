@@ -303,12 +303,7 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                                 onClick={downloadOnClick}
                             >
                                 <Icon className={styles['download-icon']} name={downloadIconName} />
-                                {
-                                    downloadStateLabel !== null ?
-                                        <div className={styles['download-label']}>{downloadStateLabel}</div>
-                                        :
-                                        null
-                                }
+                                <div className={styles['download-label']}>{downloadStateLabel !== null ? downloadStateLabel : DOWNLOAD_LABEL}</div>
                             </Button>
                             {
                                 canDownloadSeason ?
@@ -320,6 +315,7 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                                         onClick={downloadSeasonOnClick}
                                     >
                                         <Icon className={styles['download-icon']} name={'episodes'} />
+                                        <div className={styles['download-label']}>{DOWNLOAD_SEASON_LABEL}</div>
                                     </Button>
                                     :
                                     null
