@@ -14,12 +14,17 @@ const { default: usePlayUrl } = require('stremio/common/usePlayUrl');
 const useToast = require('stremio/common/Toast/useToast');
 const { withCoreSuspender } = require('stremio/common/CoreSuspender');
 const useStreamingServer = require('stremio/common/useStreamingServer');
-const { isHomeIompApp, postToApp } = require('stremio/common/homeiompBridge');
+const { isAppleMobileBrowser, isHomeIompApp, postToApp, IOS_APP_INSTALL_URL } = require('stremio/common/homeiompBridge');
 const styles = require('./styles');
 
 // HomeIomp: the app-only Downloads entry. A constant rather than a translation key on
 // purpose - it never reaches a browser, and the upstream translation bundle has no key for it.
 const DOWNLOADS_LABEL = 'Downloads';
+
+// HomeIomp: the mirror image of the entry above - shown only OUTSIDE the app, and only on an
+// iPhone or iPad, where tapping it is an install. Constants for the same reason: neither string
+// exists upstream, and i18nScan would flag a t() call for a key no translation bundle has.
+const IOS_APP_LABEL = 'Get the iOS app';
 
 const NavMenuContent = ({ onClick }) => {
     const { t } = useTranslation();
@@ -65,6 +70,10 @@ const NavMenuContent = ({ onClick }) => {
     const onDownloadsClick = React.useCallback(() => {
         postToApp('openDownloads');
     }, []);
+    // HomeIomp: and the offer to install it, for the one visitor who can act on it - an iPhone
+    // or iPad in a browser. False on every desktop and inside the app itself, so the PC menu is
+    // untouched and the app does not offer to install the app.
+    const offerIosApp = React.useMemo(() => isAppleMobileBrowser(), []);
     return (
         <div className={classnames(styles['nav-menu-container'], 'animation-fade-in', { [styles['with-warning']]: !streamingServerWarningDismissed } )} onClick={onClick}>
             <div className={styles['user-info-container']}>
@@ -106,6 +115,18 @@ const NavMenuContent = ({ onClick }) => {
                         <Button className={styles['nav-menu-option-container']} title={DOWNLOADS_LABEL} onClick={onDownloadsClick}>
                             <Icon className={styles['icon']} name={'download'} />
                             <div className={styles['nav-menu-option-label']}>{DOWNLOADS_LABEL}</div>
+                        </Button>
+                        :
+                        null
+                }
+                {
+                    offerIosApp ?
+                        // No target and no download attribute: iOS has to NAVIGATE to this
+                        // scheme for its install dialog to appear, and a new tab or a browser
+                        // told to save it instead does nothing at all.
+                        <Button className={styles['nav-menu-option-container']} title={IOS_APP_LABEL} href={IOS_APP_INSTALL_URL}>
+                            <Icon className={styles['icon']} name={'download'} />
+                            <div className={styles['nav-menu-option-label']}>{IOS_APP_LABEL}</div>
                         </Button>
                         :
                         null

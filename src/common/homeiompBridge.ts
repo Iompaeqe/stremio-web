@@ -73,6 +73,35 @@ const messageHandler = (): any => {
 
 export const isHomeIompApp = (): boolean => homeIompAppInfo() !== null || messageHandler() !== null;
 
+// The other half of the same question: an Apple phone or tablet that is NOT already inside the
+// app, and therefore the one visitor to this page who can be offered the app itself.
+//
+// iPadOS reports itself as a Mac in the user agent - deliberately, so that sites serve it the
+// desktop layout - so the touch check is what separates a tablet from a MacBook. A desktop is
+// excluded because 'itms-services://' is an unhandled scheme there and the entry would be a
+// menu row that does nothing when tapped.
+export const isAppleMobileBrowser = (): boolean => {
+    if (typeof navigator === 'undefined' || typeof document === 'undefined') return false;
+    if (isHomeIompApp()) return false;
+    const ua = navigator.userAgent;
+    const apple = /iPhone|iPod/.test(ua) || (/iPad|Macintosh/.test(ua) && 'ontouchend' in document);
+    return apple;
+};
+
+// The OTA install link for the native Stremio app, and the reason it is spelled this way.
+//
+// Tapping it does not download anything: iOS reads the manifest and fetches the IPA ITSELF,
+// from a system process, then puts up its own install dialog. That process sends no cookies and
+// no Cloudflare Access token, which is why /downloads/ios/* is - and must stay - ungated. The
+// real protection is ad-hoc signing: the build refuses to launch on a device that is not in its
+// provisioning profile.
+//
+// The manifest URL is percent-encoded down to the unreserved set because it rides inside
+// another URL's query; every ':' and '/' has to become %3A / %2F or the outer query ends early.
+// Apple's own documented form of this link is encoded that way.
+export const IOS_APP_MANIFEST_URL = 'https://homeiomp.xyz/downloads/ios/stremio/manifest.plist';
+export const IOS_APP_INSTALL_URL = `itms-services://?action=download-manifest&url=${encodeURIComponent(IOS_APP_MANIFEST_URL)}`;
+
 // Post a message to the app. Returns whether it was handed over, so a caller can tell the
 // user "the app did not take that" instead of leaving a tap with no outcome. Never throws:
 // a missing handler is a no-op, and a payload WKWebView refuses is swallowed here.
