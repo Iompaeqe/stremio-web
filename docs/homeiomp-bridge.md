@@ -180,30 +180,50 @@ new ones can be added without a web release.
 ```json
 {
   "type": "downloadState",
+  "replace": true,
   "items": [
-    { "id": "tt0944947:1:1|8a3d5f...c91:0", "state": "downloading", "progress": 42 },
-    { "id": "tt0944947:1:2|1b7c...aa2:0", "state": "done" }
+    { "id": "tt0944947:1:1|8a3d5f...c91:0", "state": "preparing", "progress": 37 },
+    { "id": "tt0944947:1:2|1b7c...aa2:0", "state": "ready" },
+    { "id": "tt0944947:1:3|3f0e...77a:0", "state": "downloading", "progress": 42 },
+    { "id": "tt0944947:1:4|9d21...4b8:0", "state": "done" }
   ]
 }
 ```
 
-- `state`: `queued` | `downloading` | `paused` | `done` | `failed`, plus `removed`, which is a
-  command rather than a state. **Anything else draws no badge at all** — the row falls back to a
-  plain `Download` button rather than putting the app's internal vocabulary on a stream row. A
-  new state therefore needs a web release before it can be seen, which is the deliberate trade.
-- **`removed`** deletes that id from the page's cache: the row goes back to a plain `Download`
-  button. It is the only way back to "no state at all", and it is what the app should push when a
-  download is cancelled, deleted or reaped.
-- `progress`: percent, `0`–`100`, optional. Used for `downloading` (and appended to `Paused`);
-  everything else has a fixed label.
-- Items are **merged** into the page's cache by `id`, not replaced wholesale, so the app may push
-  only what changed. The cache is memory-only and is lost on reload — push a full snapshot once
-  after the page loads (a `didFinish` navigation callback is the natural place).
+- **`replace`** decides what the list means. `true` — what the app always sends — makes it the
+  **whole truth**: the page empties its cache first, so an id that is not in the list stops
+  having a badge. That is the only reliable way for a deleted download to lose its "Downloaded"
+  mark, and its absence was a real bug (the app deleted an item, the page went on showing it).
+  Absent or `false` **merges** by id, which is for a one-off correction the app wants to make
+  without gathering a snapshot first.
+- `state`, in the order an episode travels:
 
-The whole vocabulary of the badge: `Queued`, `NN%` (or `Downloading` before there is a number),
-`Paused NN%`, `Failed`, `Downloaded`. The icon becomes a checkmark for `done` and a warning for
-`failed`. Inside the app the row's trailing play circle is not drawn — the whole row is the tap
-target and the description wants the width — while a browser keeps it.
+  | state | means | badge |
+  | --- | --- | --- |
+  | `queued` | the server has taken it, nothing is happening yet | `Queued` |
+  | `preparing` | the server is remuxing it; `progress` is **the server's** | `Preparing NN%` |
+  | `ready` | prepared on the server, not on this phone | `On server` (quiet, no accent) |
+  | `downloading` | the phone is fetching the file; `progress` is the fetch | `NN%` |
+  | `paused` | the fetch is paused | `Paused NN%` |
+  | `done` | the file is on the phone | `Downloaded` |
+  | `failed` | needs a different stream, not another tap | `Failed` |
+
+  **Anything else draws no badge at all** — the row falls back to a plain `Download` button
+  rather than putting the app's internal vocabulary on a stream row. A new state therefore needs
+  a web release before it can be seen, which is the deliberate trade.
+- **`removed`** deletes that id from the page's cache. It only matters on a merging push; a
+  replacing one has already dropped what is gone.
+- `progress`: percent, `0`–`100`, optional. `preparing` is the remux, `downloading`/`paused` are
+  the fetch; the rest have fixed labels. The two percentages are deliberately worded differently
+  — a remux is not a download, and a bar that says 90% while nothing has reached the phone is
+  the complaint that produced this table.
+- The cache is memory-only and is lost on reload — push the snapshot again on every finished
+  navigation (`didFinish` is the natural place).
+
+Every badge except `On server` is drawn in the accent fill; `On server` stays quiet and remains
+tappable, because tapping is how it gets fetched. The icon becomes a checkmark for `done` and a
+warning for `failed`. Inside the app the row's trailing play circle is not drawn — the row itself
+plays and the description wants the width — while a browser keeps it.
 
 ### Subscribing from page code
 
@@ -245,19 +265,26 @@ window.webkit.messageHandlers.homeiomp = {
         window.lastHomeIompMessage = message;
         // Answer a download the way the app would.
         if (message.type === 'download') {
-            let progress = 0;
+            // The app's real sequence: the server takes it, remuxes it, holds it, then the
+            // phone fetches it. Every push is a full snapshot, like the app's.
+            const steps = [
+                { state: 'queued' },
+                { state: 'preparing', progress: 40 },
+                { state: 'preparing', progress: 90 },
+                { state: 'ready' },
+                { state: 'downloading', progress: 30 },
+                { state: 'downloading', progress: 80 },
+                { state: 'done' },
+            ];
+            let step = 0;
             const tick = setInterval(() => {
-                progress += 20;
                 window.homeiompApp.onEvent(JSON.stringify({
                     type: 'downloadState',
-                    items: [{
-                        id: message.id,
-                        state: progress >= 100 ? 'done' : 'downloading',
-                        progress: Math.min(progress, 100),
-                    }],
+                    replace: true,
+                    items: [{ id: message.id, ...steps[step] }],
                 }));
-                if (progress >= 100) clearInterval(tick);
-            }, 1000);
+                if (++step >= steps.length) clearInterval(tick);
+            }, 1500);
         }
     },
 };
@@ -278,7 +305,10 @@ copy(JSON.stringify(window.lastHomeIompMessage, null, 2));
 To check the other direction on its own:
 
 ```js
-window.homeiompApp.onEvent({ type: 'downloadState', items: [{ id: window.lastHomeIompMessage.id, state: 'failed' }] });
+window.homeiompApp.onEvent({ type: 'downloadState', replace: true, items: [{ id: window.lastHomeIompMessage.id, state: 'failed' }] });
+
+// And the deletion path: a replacing push that does not mention the id clears its badge.
+window.homeiompApp.onEvent({ type: 'downloadState', replace: true, items: [] });
 ```
 
 Removing the marker and the handler and reloading returns the page to its normal browser state —

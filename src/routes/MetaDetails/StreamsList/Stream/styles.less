@@ -112,9 +112,10 @@
         background-color: var(--secondary-accent-color);
     }
 
-    // HomeIomp: the download actions, rendered only inside the native app. Unlike the play
-    // circle they are always visible - the app is a phone, where there is no hover to reveal
-    // anything - and they are deliberately quieter than the accent-coloured play circle.
+    // HomeIomp: the download actions, rendered only inside the native app - where the play
+    // circle above is NOT rendered at all, because the row itself plays and the circle only
+    // cost the description width. These are always visible: the app is a phone, where there
+    // is no hover to reveal anything.
     // Own full-width line under the row (the container wraps), so the stream
     // description keeps every pixel it had in a browser - the owner could not
     // read sizes/seeders when these sat beside it.

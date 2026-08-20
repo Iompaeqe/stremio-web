@@ -17,10 +17,12 @@ const styles = require('./styles');
 // bundle this fork pulls in has no key to carry them.
 const DOWNLOAD_LABEL = 'Download';
 const DOWNLOAD_SEASON_LABEL = 'Download season';
-// The whole vocabulary of the badge. The owner asked for three marks - queued, downloading
-// with a percentage, downloaded - and paused/failed cost nothing to add. Anything else the
-// app invents later shows NO badge rather than leaking a raw state string onto the row.
+// The whole vocabulary of the badge, in the order an episode travels: the server takes it,
+// remuxes it, holds it, then the phone fetches it. Anything else the app invents later shows
+// NO badge rather than leaking a raw state string onto the row.
 const QUEUED_LABEL = 'Queued';
+const PREPARING_LABEL = 'Preparing';
+const ON_SERVER_LABEL = 'On server';
 const DOWNLOADING_LABEL = 'Downloading';
 const PAUSED_LABEL = 'Paused';
 const FAILED_LABEL = 'Failed';
@@ -225,6 +227,11 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
         const percent = typeof downloadState.progress === 'number' ? Math.round(downloadState.progress) + '%' : null;
         switch (downloadState.state) {
             case 'queued': return QUEUED_LABEL;
+            // The server's remux percentage, said as what it is - it is not a download.
+            case 'preparing': return percent !== null ? PREPARING_LABEL + ' ' + percent : PREPARING_LABEL;
+            // Prepared, and deliberately not on this phone. Quiet, and still tappable:
+            // tapping is how it gets fetched.
+            case 'ready': return ON_SERVER_LABEL;
             case 'downloading': return percent !== null ? percent : DOWNLOADING_LABEL;
             case 'paused': return percent !== null ? PAUSED_LABEL + ' ' + percent : PAUSED_LABEL;
             case 'failed': return FAILED_LABEL;
@@ -324,7 +331,7 @@ const Stream = ({ className, videoId, videoReleased, addonName, name, descriptio
                     inApp && stream ?
                         <div className={styles['download-actions']}>
                             <Button
-                                className={classnames(styles['download-button'], { [styles['download-active']]: downloadStateLabel !== null })}
+                                className={classnames(styles['download-button'], { [styles['download-active']]: downloadStateLabel !== null && downloadState?.state !== 'ready' })}
                                 title={downloadStateLabel !== null ? DOWNLOAD_LABEL + ' - ' + downloadStateLabel : DOWNLOAD_LABEL}
                                 tabIndex={-1}
                                 onPointerDown={downloadOnPointerDown}
