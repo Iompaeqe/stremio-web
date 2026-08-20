@@ -35,22 +35,12 @@ export type HomeIompAppInfo = {
 
 export type DownloadState = {
     id: string,
-    // Where this episode actually is, in the order it travels:
-    //
-    //   queued      the server has taken it and has not started
-    //   preparing   the server is remuxing it - `progress` is THE SERVER'S percentage
-    //   ready       done on the server, not on this phone ("On server")
-    //   downloading the phone is fetching the file - `progress` is the fetch
-    //   paused      the fetch is paused
-    //   done        the file is on the phone
-    //   failed      it will not happen without a different stream
-    //
-    // The row draws exactly those and nothing else: a state this page does not know shows NO
-    // badge rather than putting the app's internal vocabulary on a stream row.
+    // queued | downloading | paused | done | failed. The row draws exactly those and nothing
+    // else: a state this page does not know shows NO badge rather than putting the app's
+    // internal vocabulary on a stream row.
     //
     // 'removed' is not a state: it deletes the id (see dispatch), so the row goes back to a
-    // plain Download button. It is only needed for a merging push - a replacing one drops
-    // vanished ids on its own.
+    // plain Download button.
     state: string,
     progress?: number,
 };
@@ -104,16 +94,12 @@ const downloadStates = new Map<string, DownloadState>();
 
 const dispatch = (event: AppEvent): void => {
     if (event.type === 'downloadState' && Array.isArray(event.items)) {
-        // `replace: true` means "this list is the whole truth". The cache is emptied first, so
-        // an id the app no longer has simply stops existing here - which is the ONLY reliable
-        // way for a deleted download to lose its badge. Merging alone left a row saying
-        // "Downloaded" for a file the owner had just deleted, because nothing ever said so.
-        // The app sends full snapshots; a merging push is for one-off corrections.
-        if (event.replace === true) downloadStates.clear();
         for (const item of event.items) {
             if (!item || typeof item.id !== 'string') continue;
             // 'removed' is the app saying the download is gone - cancelled, deleted, reaped.
-            // Only meaningful on a merging push; a replacing one has already dropped it.
+            // The id is dropped rather than remembered as a state, so the row returns to a
+            // plain Download button instead of being stuck describing something that no
+            // longer exists. It is the only way back to "no state" the app has.
             if (item.state === 'removed') {
                 downloadStates.delete(item.id);
                 continue;
