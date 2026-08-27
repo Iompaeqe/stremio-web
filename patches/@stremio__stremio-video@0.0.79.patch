@@ -1,8 +1,8 @@
 diff --git a/src/HTMLVideo/HTMLVideo.js b/src/HTMLVideo/HTMLVideo.js
-index 902b93e3564339506e7757688dbd8ca11feb5ace..fdd6a69386bc3677764d6f04f5003fa214709f52 100644
+index 902b93e3564339506e7757688dbd8ca11feb5ace..891c28f826bfdb66e7ca14fdbc209abc436ebb86 100644
 --- a/src/HTMLVideo/HTMLVideo.js
 +++ b/src/HTMLVideo/HTMLVideo.js
-@@ -5,8 +5,19 @@ var deepFreeze = require('deep-freeze');
+@@ -5,8 +5,37 @@ var deepFreeze = require('deep-freeze');
  var Color = require('color');
  var ERROR = require('../error');
  var getContentType = require('./getContentType');
@@ -19,10 +19,156 @@ index 902b93e3564339506e7757688dbd8ca11feb5ace..fdd6a69386bc3677764d6f04f5003fa2
 +        null;
 +}
 +
++// The audio renditions the platform's own HLS stack publishes on the <video> element, or null
++// wherever the stock code paths are still in charge. Three things have to be true for a caller
++// to read them: the browser is one that plays HLS natively and cannot run hls.js (so the
++// hls.js-driven properties are permanently empty there), it implements WebKit's AudioTrackList
++// at all (Chrome does not — the element simply has no `audioTracks`, and every caller below
++// falls back to exactly its previous behaviour), and the list has actually been populated.
++function nativeAudioTracks(videoElement) {
++    if (!nativeHlsOnly()) {
++        return null;
++    }
++
++    var tracks = videoElement.audioTracks;
++    return tracks && typeof tracks.length === 'number' && tracks.length > 0 ?
++        tracks
++        :
++        null;
++}
++
  function HTMLVideo(options) {
      options = options || {};
  
-@@ -603,38 +614,46 @@ function HTMLVideo(options) {
+@@ -106,6 +135,37 @@ function HTMLVideo(options) {
+     videoElement.addEventListener('webkitendfullscreen', onFullscreenChanged);
+     videoElement.addEventListener('fullscreenchange', onFullscreenChanged);
+ 
++    // On the native-HLS path nothing else announces the audio renditions: they appear on
++    // videoElement.audioTracks while WebKit parses the master playlist, long after the load
++    // command reported an empty list, and the user switching one fires 'change' on the list
++    // rather than on the element. These mirror what the hls.js listeners do for their path.
++    var nativeAudioTracksBound = false;
++    function onNativeAudioTracksChanged() {
++        onPropChanged('audioTracks');
++        onPropChanged('selectedAudioTrackId');
++    }
++    function bindNativeAudioTracks() {
++        var tracks = videoElement.audioTracks;
++        if (nativeAudioTracksBound || !tracks || typeof tracks.addEventListener !== 'function') {
++            return;
++        }
++
++        tracks.addEventListener('addtrack', onNativeAudioTracksChanged);
++        tracks.addEventListener('removetrack', onNativeAudioTracksChanged);
++        tracks.addEventListener('change', onNativeAudioTracksChanged);
++        nativeAudioTracksBound = true;
++    }
++    function unbindNativeAudioTracks() {
++        var tracks = videoElement.audioTracks;
++        if (nativeAudioTracksBound && tracks && typeof tracks.removeEventListener === 'function') {
++            tracks.removeEventListener('addtrack', onNativeAudioTracksChanged);
++            tracks.removeEventListener('removetrack', onNativeAudioTracksChanged);
++            tracks.removeEventListener('change', onNativeAudioTracksChanged);
++        }
++
++        nativeAudioTracksBound = false;
++    }
++
+     var hls = null;
+     var events = new EventEmitter();
+     var destroyed = false;
+@@ -264,7 +324,36 @@ function HTMLVideo(options) {
+             }
+             case 'audioTracks': {
+                 if (hls === null || !Array.isArray(hls.allAudioTracks)) {
+-                    return [];
++                    // Native-HLS playback: hls.js never ran, so the renditions live on the
++                    // element itself. Mapped to the very shape the hls.js branch below
++                    // produces, so no caller can tell which stack decoded the playlist.
++                    var nativeTracks = hls === null && stream !== null ? nativeAudioTracks(videoElement) : null;
++                    if (nativeTracks === null) {
++                        return [];
++                    }
++
++                    return Array.from(nativeTracks)
++                        .map(function(track, index) {
++                            return Object.freeze({
++                                id: 'EMBEDDED_' + String(index),
++                                lang: typeof track.language === 'string' && track.language.length > 0 ?
++                                    track.language
++                                    :
++                                    typeof track.label === 'string' && track.label.length > 0 ?
++                                        track.label
++                                        :
++                                        String(index),
++                                label: typeof track.label === 'string' && track.label.length > 0 ?
++                                    track.label
++                                    :
++                                    typeof track.language === 'string' && track.language.length > 0 ?
++                                        track.language
++                                        :
++                                        String(index),
++                                origin: 'EMBEDDED',
++                                embedded: true
++                            });
++                        });
+                 }
+ 
+                 return hls.allAudioTracks
+@@ -292,6 +381,19 @@ function HTMLVideo(options) {
+             }
+             case 'selectedAudioTrackId': {
+                 if (hls === null || hls.audioTrack === -1) {
++                    // Native-HLS playback: the enabled rendition is the selected one, in the
++                    // same index scheme getProp('audioTracks') just handed out.
++                    var nativeSelectionTracks = hls === null && stream !== null ? nativeAudioTracks(videoElement) : null;
++                    if (nativeSelectionTracks === null) {
++                        return null;
++                    }
++
++                    for (var nativeSelectionIndex = 0; nativeSelectionIndex < nativeSelectionTracks.length; nativeSelectionIndex++) {
++                        if (nativeSelectionTracks[nativeSelectionIndex].enabled) {
++                            return 'EMBEDDED_' + String(nativeSelectionIndex);
++                        }
++                    }
++
+                     return null;
+                 }
+ 
+@@ -528,6 +630,31 @@ function HTMLVideo(options) {
+                         onPropChanged('selectedAudioTrackId');
+                         events.emit('audioTrackLoaded', selectedAudioTrack);
+                     }
++                } else {
++                    // Native-HLS playback: the same selection, made on the element's own list.
++                    var nativeSelectableTracks = stream !== null ? nativeAudioTracks(videoElement) : null;
++                    if (nativeSelectableTracks !== null) {
++                        var selectedNativeAudioTrack = getProp('audioTracks')
++                            .find(function(track) {
++                                return track.id === propValue;
++                            });
++                        if (selectedNativeAudioTrack) {
++                            var nativeTrackIndex = parseInt(selectedNativeAudioTrack.id.split('_').pop(), 10);
++                            if (nativeTrackIndex >= 0 && nativeTrackIndex < nativeSelectableTracks.length) {
++                                // Enable the wanted rendition before disabling the rest, so the
++                                // element is never momentarily left with no audio at all.
++                                nativeSelectableTracks[nativeTrackIndex].enabled = true;
++                                for (var otherTrackIndex = 0; otherTrackIndex < nativeSelectableTracks.length; otherTrackIndex++) {
++                                    if (otherTrackIndex !== nativeTrackIndex) {
++                                        nativeSelectableTracks[otherTrackIndex].enabled = false;
++                                    }
++                                }
++                            }
++
++                            onPropChanged('selectedAudioTrackId');
++                            events.emit('audioTrackLoaded', selectedNativeAudioTrack);
++                        }
++                    }
+                 }
+ 
+                 break;
+@@ -603,38 +730,47 @@ function HTMLVideo(options) {
                      onPropChanged('audioTracks');
                      onPropChanged('selectedAudioTrackId');
                      onPropChanged('fullscreen');
@@ -31,28 +177,12 @@ index 902b93e3564339506e7757688dbd8ca11feb5ace..fdd6a69386bc3677764d6f04f5003fa2
 -                            if (stream !== commandArgs.stream) {
 -                                return;
 -                            }
--
--                            if (contentType === 'application/vnd.apple.mpegurl' && Hls.isSupported()) {
--                                hls = new Hls(HLS_CONFIG);
--                                hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, function() {
--                                    onPropChanged('audioTracks');
--                                    onPropChanged('selectedAudioTrackId');
--                                });
--                                hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, function() {
--                                    onPropChanged('audioTracks');
--                                    onPropChanged('selectedAudioTrackId');
--                                });
--                                hls.on(Hls.Events.MANIFEST_LOADING, function() {
--                                    hls.subtitleTrack = -1;
--                                });
--                                hls.loadSource(stream.url);
--                                hls.attachMedia(videoElement);
--                            } else {
 +                    if (nativeHlsOnly() && declaredContentType(stream) === 'application/vnd.apple.mpegurl') {
 +                        // hls.js cannot run here, but the platform plays HLS natively: hand the
 +                        // playlist straight to the element. Probing the content type first would
 +                        // only cost a round trip (and open a stray transcoding session on the
 +                        // server) on the way to this very same assignment.
++                        bindNativeAudioTracks();
 +                        videoElement.src = stream.url;
 +                    } else {
 +                        getContentType(stream)
@@ -84,7 +214,23 @@ index 902b93e3564339506e7757688dbd8ca11feb5ace..fdd6a69386bc3677764d6f04f5003fa2
 +                                if (stream !== commandArgs.stream) {
 +                                    return;
 +                                }
-+
+ 
+-                            if (contentType === 'application/vnd.apple.mpegurl' && Hls.isSupported()) {
+-                                hls = new Hls(HLS_CONFIG);
+-                                hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, function() {
+-                                    onPropChanged('audioTracks');
+-                                    onPropChanged('selectedAudioTrackId');
+-                                });
+-                                hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, function() {
+-                                    onPropChanged('audioTracks');
+-                                    onPropChanged('selectedAudioTrackId');
+-                                });
+-                                hls.on(Hls.Events.MANIFEST_LOADING, function() {
+-                                    hls.subtitleTrack = -1;
+-                                });
+-                                hls.loadSource(stream.url);
+-                                hls.attachMedia(videoElement);
+-                            } else {
                                  videoElement.src = stream.url;
 -                            }
 -                        })
@@ -100,6 +246,14 @@ index 902b93e3564339506e7757688dbd8ca11feb5ace..fdd6a69386bc3677764d6f04f5003fa2
                  } else {
                      onError(Object.assign({}, ERROR.UNSUPPORTED_STREAM, {
                          critical: true,
+@@ -648,6 +784,7 @@ function HTMLVideo(options) {
+                 Array.from(videoElement.textTracks).forEach(function(track) {
+                     track.oncuechange = null;
+                 });
++                unbindNativeAudioTracks();
+                 if (hls !== null) {
+                     hls.removeAllListeners();
+                     hls.detachMedia(videoElement);
 diff --git a/src/nativeHlsOnly.js b/src/nativeHlsOnly.js
 new file mode 100644
 index 0000000000000000000000000000000000000000..bfbbb0cb94bd7c3ac3897355dc6c14df54eb01df
