@@ -5,6 +5,7 @@ import { Button, MultiselectMenu } from 'stremio/components';
 import { useToast } from 'stremio/common';
 import { Section, Option } from '../components';
 import URLsManager from './URLsManager';
+import RestartServer from './RestartServer';
 import useStreamingOptions from './useStreamingOptions';
 import styles from './Streaming.less';
 
@@ -40,6 +41,8 @@ const Streaming = forwardRef<HTMLDivElement, Props>(({ profile, streamingServer 
     return (
         <Section ref={ref} label={'SETTINGS_NAV_STREAMING'}>
             <URLsManager />
+            {/* HomeIomp: restart the streaming server without finding a terminal. */}
+            <RestartServer streamingServerUrl={profile.settings.streamingServerUrl ?? null} />
             {
                 streamingServerRemoteUrlInput.value !== null &&
                     <Option className={styles['configure-input-container']} label={'SETTINGS_REMOTE_URL'}>
