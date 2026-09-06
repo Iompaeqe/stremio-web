@@ -8,6 +8,7 @@ const { Router } = require('stremio-router');
 const { Chromecast, ServicesProvider, GamepadProvider } = require('stremio/services');
 const { NotFound } = require('stremio/routes');
 const { FullscreenProvider, ToastProvider, TooltipProvider, ShortcutsProvider, CONSTANTS, useBinaryState, useProfile, withCoreSuspender, onFileDrop, usePlatform } = require('stremio/common');
+const { ensureStreamingDoor } = require('stremio/common/streamingDoor');
 const ServicesToaster = require('./ServicesToaster');
 const DeepLinkHandler = require('./DeepLinkHandler');
 const SearchParamsHandler = require('./SearchParamsHandler');
@@ -145,6 +146,13 @@ const App = () => {
             shell.send('quit');
         }
     }, [profile.settings, shell.state.windowClosed]);
+
+    // Ask early — at startup rather than at the moment a video is opened — whether the streaming
+    // server is reachable over the LAN, so the answer is already in hand by the time the player
+    // needs it. Fire and forget; nothing here can fail in a way playback would notice.
+    React.useEffect(() => {
+        ensureStreamingDoor(profile.settings?.streamingServerUrl);
+    }, [profile.settings?.streamingServerUrl]);
 
     React.useEffect(() => {
         const onWindowFocus = () => {

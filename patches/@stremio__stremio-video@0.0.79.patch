@@ -254,6 +254,33 @@ index 902b93e3564339506e7757688dbd8ca11feb5ace..891c28f826bfdb66e7ca14fdbc209abc
                  if (hls !== null) {
                      hls.removeAllListeners();
                      hls.detachMedia(videoElement);
+diff --git a/src/mediaCapabilities.js b/src/mediaCapabilities.js
+index 0dac6d4d77e8e1d3cb9b38ecf66a860c60fb2b18..70ef6fdaed10cf161820b5250dc9571e143ecc3b 100644
+--- a/src/mediaCapabilities.js
++++ b/src/mediaCapabilities.js
+@@ -63,8 +63,20 @@ function getMaxAudioChannels() {
+         return 2;
+     }
+ 
+-    var maxChannelCount = new AudioContext().destination.maxChannelCount;
+-    return maxChannelCount > 0 ? maxChannelCount : 2;
++    // This runs at import, long before any user gesture. The channel count is all we want from
++    // the context, and an audio context left open for the life of the document holds a real audio
++    // unit on iOS — enough, in a page that also plays video, to be worth the two extra lines.
++    try {
++        var context = new AudioContext();
++        var maxChannelCount = context.destination.maxChannelCount;
++        if (typeof context.close === 'function') {
++            context.close();
++        }
++
++        return maxChannelCount > 0 ? maxChannelCount : 2;
++    } catch (error) {
++        return 2;
++    }
+ }
+ 
+ function getMediaCapabilities() {
 diff --git a/src/nativeHlsOnly.js b/src/nativeHlsOnly.js
 new file mode 100644
 index 0000000000000000000000000000000000000000..bfbbb0cb94bd7c3ac3897355dc6c14df54eb01df
@@ -298,30 +325,165 @@ index 0000000000000000000000000000000000000000..bfbbb0cb94bd7c3ac3897355dc6c14df
 +}
 +
 +module.exports = nativeHlsOnly;
+diff --git a/src/withStreamingServer/convertStream.js b/src/withStreamingServer/convertStream.js
+index 7bdfc16ee65ccc17ddfb7ed426b8b513adfb7985..56fbdfad522c9e22fe738fbf1a40e383a52b5264 100644
+--- a/src/withStreamingServer/convertStream.js
++++ b/src/withStreamingServer/convertStream.js
+@@ -1,6 +1,6 @@
+-var url = require('url');
+ var magnet = require('magnet-uri');
+ var createTorrent = require('./createTorrent');
++var serverURL = require('./serverURL');
+ 
+ function buildProxyUrl(streamingServerURL, streamURL, requestHeaders, responseHeaders) {
+     var parsedStreamURL = new URL(streamURL);
+@@ -12,7 +12,7 @@ function buildProxyUrl(streamingServerURL, streamURL, requestHeaders, responseHe
+     Object.entries(responseHeaders).forEach(function(entry) {
+         proxyOptions.append('r', entry[0] + ':' + entry[1]);
+     });
+-    return url.resolve(streamingServerURL, '/proxy/' + proxyOptions.toString() + parsedStreamURL.pathname) + parsedStreamURL.search;
++    return serverURL(streamingServerURL, '/proxy/' + proxyOptions.toString() + parsedStreamURL.pathname) + parsedStreamURL.search;
+ }
+ 
+ function convertStream(streamingServerURL, stream, seriesInfo, streamingServerSettings) {
+diff --git a/src/withStreamingServer/createTorrent.js b/src/withStreamingServer/createTorrent.js
+index 9ff6fab2a1c047aa944386cd56208edbac781e76..e6afcd06b15312670b7149a89a86c1c185594c36 100644
+--- a/src/withStreamingServer/createTorrent.js
++++ b/src/withStreamingServer/createTorrent.js
+@@ -1,4 +1,4 @@
+-var url = require('url');
++var serverURL = require('./serverURL');
+ 
+ function buildTorrent(streamingServerURL, infoHash, fileIdx, sources) {
+     var query = Array.isArray(sources) && sources.length > 0 ?
+@@ -8,7 +8,9 @@ function buildTorrent(streamingServerURL, infoHash, fileIdx, sources) {
+         :
+         '';
+     return {
+-        url: url.resolve(streamingServerURL, '/' + encodeURIComponent(infoHash) + '/' + encodeURIComponent(fileIdx)) + query,
++        // The direct-play media URL: what the <video> element is pointed at when no transcoding
++        // is needed, and what the server itself is told to open when it is.
++        url: serverURL(streamingServerURL, '/' + encodeURIComponent(infoHash) + '/' + encodeURIComponent(fileIdx)) + query,
+         infoHash: infoHash,
+         fileIdx: fileIdx,
+         sources: sources
+@@ -52,7 +54,7 @@ function createTorrent(streamingServerURL, infoHash, fileIdx, sources, seriesInf
+         body.guessFileIdx = false;
+     }
+ 
+-    return fetch(url.resolve(streamingServerURL, '/' + encodeURIComponent(infoHash) + '/create'), {
++    return fetch(serverURL(streamingServerURL, '/' + encodeURIComponent(infoHash) + '/create'), {
+         method: 'POST',
+         headers: {
+             'content-type': 'application/json'
+diff --git a/src/withStreamingServer/fetchVideoParams.js b/src/withStreamingServer/fetchVideoParams.js
+index 41382455362a88e26c0c9848b2386499ae97db1b..fe064810076b2d9d1c0d4eb3c38f7ff26bf637ee 100644
+--- a/src/withStreamingServer/fetchVideoParams.js
++++ b/src/withStreamingServer/fetchVideoParams.js
+@@ -1,4 +1,4 @@
+-var url = require('url');
++var serverURL = require('./serverURL');
+ 
+ function fetchOpensubtitlesParams(streamingServerURL, mediaURL, behaviorHints) {
+     var hash = behaviorHints && typeof behaviorHints.videoHash === 'string' ? behaviorHints.videoHash : null;
+@@ -8,7 +8,7 @@ function fetchOpensubtitlesParams(streamingServerURL, mediaURL, behaviorHints) {
+     }
+ 
+     var queryParams = new URLSearchParams([['videoUrl', mediaURL]]);
+-    return fetch(url.resolve(streamingServerURL, '/opensubHash?' + queryParams.toString()))
++    return fetch(serverURL(streamingServerURL, '/opensubHash?' + queryParams.toString()))
+         .then(function(resp) {
+             if (resp.ok) {
+                 return resp.json();
+@@ -52,7 +52,7 @@ function fetchFilename(streamingServerURL, mediaURL, infoHash, fileIdx, behavior
+         var hasSpecificFileIdx = fileIdxNum !== null && fileIdxNum !== -1 && isFinite(fileIdxNum);
+ 
+         if (hasSpecificFileIdx) {
+-            return fetch(url.resolve(streamingServerURL, '/' + encodeURIComponent(infoHash) + '/' + encodeURIComponent(fileIdx) + '/stats.json'))
++            return fetch(serverURL(streamingServerURL, '/' + encodeURIComponent(infoHash) + '/' + encodeURIComponent(fileIdx) + '/stats.json'))
+                 .then(function(resp) {
+                     if (resp.ok) {
+                         return resp.json();
+@@ -69,7 +69,7 @@ function fetchFilename(streamingServerURL, mediaURL, infoHash, fileIdx, behavior
+                 });
+         }
+ 
+-        return fetch(url.resolve(streamingServerURL, '/' + encodeURIComponent(infoHash) + '/stats.json'))
++        return fetch(serverURL(streamingServerURL, '/' + encodeURIComponent(infoHash) + '/stats.json'))
+             .then(function(resp) {
+                 if (resp.ok) {
+                     return resp.json();
+diff --git a/src/withStreamingServer/serverURL.js b/src/withStreamingServer/serverURL.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..6dfd539ad299a84e75888f4a4f02f05c9a5bd6db
+--- /dev/null
++++ b/src/withStreamingServer/serverURL.js
+@@ -0,0 +1,33 @@
++var url = require('url');
++
++// Every URL that addresses the streaming server is built here. One primitive, so a call site
++// cannot be forgotten again — the previous fix corrected three of them and left five behind.
++//
++// The stock code calls `url.resolve(streamingServerURL, '/whatever')`, and url.resolve REPLACES
++// the base path with the absolute one it is given. With a streaming server mounted on a subpath —
++// https://host/stremio-server/ — '/hlsv2/…' resolves to https://host/hlsv2/…, which is not the
++// streaming server at all: the request lands on whatever else that origin serves (for us, the hub
++// answering 404 text/html) and the player reports a broken stream rather than a bad URL.
++//
++// So: join instead of replace. For a streaming server whose path is already "/" — every desktop
++// install, http://127.0.0.1:11470/ — joining produces byte-for-byte the string url.resolve
++// produced, so nothing that worked before changes. url.resolve remains the fallback for input
++// the URL constructor refuses, which keeps even a malformed server URL behaving as it used to.
++function serverURL(streamingServerURL, path) {
++    if (typeof streamingServerURL !== 'string' || streamingServerURL.length === 0) {
++        return url.resolve(streamingServerURL, path);
++    }
++
++    var base = streamingServerURL.charAt(streamingServerURL.length - 1) === '/' ?
++        streamingServerURL
++        :
++        streamingServerURL + '/';
++
++    try {
++        return new URL(String(path).replace(/^\/+/, ''), base).href;
++    } catch (error) {
++        return url.resolve(streamingServerURL, path);
++    }
++}
++
++module.exports = serverURL;
 diff --git a/src/withStreamingServer/withStreamingServer.js b/src/withStreamingServer/withStreamingServer.js
-index 5e51c7976e73b9875217680b0d193a3a40877568..72f6060857c23632e261c2f2e94799d15f464972 100644
+index 5e51c7976e73b9875217680b0d193a3a40877568..b8cb4798183344867f2c7ace6baa6229d7571430 100644
 --- a/src/withStreamingServer/withStreamingServer.js
 +++ b/src/withStreamingServer/withStreamingServer.js
-@@ -8,8 +8,79 @@ var convertStream = require('./convertStream');
+@@ -1,5 +1,4 @@
+ var EventEmitter = require('eventemitter3');
+-var url = require('url');
+ var hat = require('hat');
+ var cloneDeep = require('lodash.clonedeep');
+ var deepFreeze = require('deep-freeze');
+@@ -7,9 +6,103 @@ var mediaCapabilities = require('../mediaCapabilities');
+ var convertStream = require('./convertStream');
  var fetchVideoParams = require('./fetchVideoParams');
  var isPlayerLoaded = require('./isPlayerLoaded');
++var serverURL = require('./serverURL');
  var supportsTranscoding = require('../supportsTranscoding');
 +var nativeHlsOnly = require('../nativeHlsOnly');
  var ERROR = require('../error');
  
 +// ---------------------------------------------------------------------------------------------
-+// Native-HLS transcoding path (iOS Safari).
++// A streaming server reached through a reverse proxy, and native-HLS playback (iOS Safari).
 +//
-+// A browser without MediaSource cannot run hls.js, so the /hlsv2/ playlist has to be handed to the
-+// <video> element as a plain src and decoded by the platform's own HLS stack. Two things get in the
-+// way of that when the streaming server is reached through a reverse proxy, and both are corrected
-+// below — but only while `nativeHlsOnly()` is true, so every browser that can run hls.js keeps the
-+// stock behaviour untouched.
++// Two separate corrections live here. The first is unconditional; the second only applies on the
++// native-HLS path, where the /hlsv2/ playlist is handed to the <video> element as a plain src
++// because a browser without MediaSource cannot run hls.js.
 +//
-+//   1. `url.resolve(base, '/hlsv2/...')` replaces the base path instead of extending it, so a
-+//      streaming server mounted on a subpath (https://host/stremio-server/) loses that prefix and
-+//      the request never reaches the server at all. `joinServerURL` joins rather than replaces; for
-+//      a server URL whose path is already "/" it produces the exact same string as `url.resolve`.
++//   1. URL building. `url.resolve(base, '/hlsv2/...')` replaces the base path instead of extending
++//      it, so a streaming server mounted on a subpath (https://host/stremio-server/) loses that
++//      prefix and the request never reaches the server. That is fixed for every request in
++//      ./serverURL, which is now the only way any of them is built — a correct URL must not depend
++//      on which decoder the browser happens to own, and for a server URL whose path is already "/"
++//      the helper returns exactly what url.resolve returned.
 +//
 +//   2. `mediaURL` is fetched by the *streaming server*, not by the browser. Handing it the public
 +//      URL sends the server back out through its own reverse proxy, where an access-control layer
@@ -333,19 +495,41 @@ index 5e51c7976e73b9875217680b0d193a3a40877568..72f6060857c23632e261c2f2e94799d1
 +// The port the streaming server always listens on; its own loopback view of itself.
 +var SERVER_LOCAL_ORIGIN = 'http://127.0.0.1:11470';
 +
-+function joinServerURL(streamingServerURL, path) {
-+    var base = streamingServerURL.charAt(streamingServerURL.length - 1) === '/' ?
-+        streamingServerURL
-+        :
-+        streamingServerURL + '/';
-+    return new URL(path.replace(/^\/+/, ''), base).href;
++// The switch for advertising HEVC to the streaming server on the native-HLS path. Default on;
++// Settings -> Info shows it and tapping it writes '0' here, so a release that misbehaves can be
++// put back on the H.264 path from the phone without a rebuild.
++var HEVC_PASSTHROUGH_KEY = 'homeiomp.hevc';
++
++function hevcPassthroughEnabled() {
++    try {
++        return window.localStorage.getItem(HEVC_PASSTHROUGH_KEY) !== '0';
++    } catch (error) {
++        return true;
++    }
 +}
 +
-+function resolveServerURL(streamingServerURL, path) {
-+    return nativeHlsOnly() ?
-+        joinServerURL(streamingServerURL, path)
-+        :
-+        url.resolve(streamingServerURL, path);
++// What this device asks the streaming server to deliver.
++//
++// An iPhone decodes HEVC in hardware, but Safari answers canPlayType() with "" for the 'hev1'
++// spelling mediaCapabilities probes with — it only admits to 'hvc1' — so the advertised list comes
++// back h264-only and the server re-encodes every x265 release into H.264 for the whole length of
++// the film. That is the expensive path (a pinned GPU, a hard bitrate ceiling) and the fragile one.
++// Advertised, the server copies the video track through instead and only remuxes.
++//
++// Confined to the native-HLS path: everywhere hls.js runs, the probe result is trustworthy and is
++// left exactly as it was.
++function advertisedVideoCodecs(videoCodecs) {
++    if (!nativeHlsOnly() || !hevcPassthroughEnabled() || !Array.isArray(videoCodecs)) {
++        return videoCodecs;
++    }
++
++    if (videoCodecs.indexOf('hevc') !== -1 || videoCodecs.indexOf('h265') !== -1) {
++        return videoCodecs;
++    }
++
++    // Both spellings, exactly as mediaCapabilities lists them when a browser does admit to HEVC:
++    // ffprobe names the codec 'hevc', the transcoding profiles match on 'h265'.
++    return videoCodecs.concat(['h265', 'hevc']);
 +}
 +
 +function serverLocalMediaURL(streamingServerURL, mediaURL, infoHash, fileIdx) {
@@ -382,7 +566,20 @@ index 5e51c7976e73b9875217680b0d193a3a40877568..72f6060857c23632e261c2f2e94799d1
  function withStreamingServer(Video) {
      function VideoWithStreamingServer(options) {
          options = options || {};
-@@ -131,7 +202,11 @@ function withStreamingServer(Video) {
+@@ -113,10 +206,10 @@ function withStreamingServer(Video) {
+                                     commandArgs.formats
+                                     :
+                                     mediaCapabilities.formats;
+-                                var videoCodecs = Array.isArray(commandArgs.videoCodecs) ?
++                                var videoCodecs = advertisedVideoCodecs(Array.isArray(commandArgs.videoCodecs) ?
+                                     commandArgs.videoCodecs
+                                     :
+-                                    mediaCapabilities.videoCodecs;
++                                    mediaCapabilities.videoCodecs);
+                                 var audioCodecs = Array.isArray(commandArgs.audioCodecs) ?
+                                     commandArgs.audioCodecs
+                                     :
+@@ -131,7 +224,11 @@ function withStreamingServer(Video) {
                                      audioCodecs: audioCodecs,
                                      maxAudioChannels: maxAudioChannels
                                  });
@@ -395,7 +592,15 @@ index 5e51c7976e73b9875217680b0d193a3a40877568..72f6060857c23632e261c2f2e94799d1
                                      .catch(function(error) {
                                          console.warn('Media probe error', error);
                                          return false;
-@@ -149,7 +224,7 @@ function withStreamingServer(Video) {
+@@ -140,6 +237,7 @@ function withStreamingServer(Video) {
+                                         if (canPlay) {
+                                             return {
+                                                 mediaURL: mediaURL,
++                                                serverMediaURL: serverMediaURL,
+                                                 infoHash: infoHash,
+                                                 fileIdx: fileIdx,
+                                                 stream: {
+@@ -149,7 +247,7 @@ function withStreamingServer(Video) {
                                          }
  
                                          var id = hat();
@@ -404,27 +609,52 @@ index 5e51c7976e73b9875217680b0d193a3a40877568..72f6060857c23632e261c2f2e94799d1
                                          if (commandArgs.forceTranscoding) {
                                              queryParams.set('forceTranscoding', '1');
                                          }
-@@ -169,12 +244,12 @@ function withStreamingServer(Video) {
+@@ -166,15 +264,16 @@ function withStreamingServer(Video) {
+ 
+                                         return {
+                                             mediaURL: mediaURL,
++                                            serverMediaURL: serverMediaURL,
                                              infoHash: infoHash,
                                              fileIdx: fileIdx,
                                              stream: {
 -                                                url: url.resolve(commandArgs.streamingServerURL, '/hlsv2/' + id + '/master.m3u8?' + queryParams.toString()),
-+                                                url: resolveServerURL(commandArgs.streamingServerURL, '/hlsv2/' + id + '/master.m3u8?' + queryParams.toString()),
++                                                url: serverURL(commandArgs.streamingServerURL, '/hlsv2/' + id + '/master.m3u8?' + queryParams.toString()),
                                                  subtitles: Array.isArray(commandArgs.stream.subtitles) ?
                                                      commandArgs.stream.subtitles.map(function(track) {
                                                          return Object.assign({}, track, {
                                                              url: typeof track.url === 'string' ?
 -                                                                url.resolve(commandArgs.streamingServerURL, '/subtitles.vtt?' + new URLSearchParams([['from', track.url]]).toString())
-+                                                                resolveServerURL(commandArgs.streamingServerURL, '/subtitles.vtt?' + new URLSearchParams([['from', track.url]]).toString())
++                                                                serverURL(commandArgs.streamingServerURL, '/subtitles.vtt?' + new URLSearchParams([['from', track.url]]).toString())
                                                                  :
                                                                  track.url
                                                          });
-@@ -357,7 +432,7 @@ function withStreamingServer(Video) {
+@@ -207,7 +306,10 @@ function withStreamingServer(Video) {
+ 
+                                 isPlayerLoaded(video, Video.manifest.props)
+                                     .then(function() {
+-                                        return fetchVideoParams(commandArgs.streamingServerURL, result.mediaURL, result.infoHash, result.fileIdx, commandArgs.stream.behaviorHints);
++                                        // /opensubHash makes the *server* open the media, so it gets
++                                        // the same server-addressable URL the transcode does; a public
++                                        // one would send the server back through its own proxy.
++                                        return fetchVideoParams(commandArgs.streamingServerURL, typeof result.serverMediaURL === 'string' ? result.serverMediaURL : result.mediaURL, result.infoHash, result.fileIdx, commandArgs.stream.behaviorHints);
+                                     })
+                                     .then(function(result) {
+                                         if (commandArgs !== loadArgs) {
+@@ -262,7 +364,7 @@ function withStreamingServer(Video) {
+                                             // fallback is used in case server conversion fails (if server is offline)
+                                             fallbackUrl: track.url,
+                                             url: typeof track.url === 'string' ?
+-                                                url.resolve(loadArgs.streamingServerURL, '/subtitles.vtt?' + new URLSearchParams([['from', track.url]]).toString())
++                                                serverURL(loadArgs.streamingServerURL, '/subtitles.vtt?' + new URLSearchParams([['from', track.url]]).toString())
+                                                 :
+                                                 track.url
+                                         });
+@@ -357,7 +459,7 @@ function withStreamingServer(Video) {
                  }
                  // probing normally gives more accurate results
                  var queryParams = new URLSearchParams([['mediaURL', stream.url]]);
 -                return fetch(url.resolve(options.streamingServerURL, '/hlsv2/probe?' + queryParams.toString()))
-+                return fetch(resolveServerURL(options.streamingServerURL, '/hlsv2/probe?' + queryParams.toString()))
++                return fetch(serverURL(options.streamingServerURL, '/hlsv2/probe?' + queryParams.toString()))
                      .then(function(resp) {
                          return resp.json();
                      })

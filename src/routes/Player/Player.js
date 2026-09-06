@@ -33,6 +33,8 @@ const Video = require('./Video');
 const { default: Indicator } = require('./Indicator/Indicator');
 const { default: useMediaSession } = require('./useMediaSession');
 const { isPictureInPictureSupported, recordPictureInPicture, togglePictureInPicture } = require('stremio/common/pictureInPicture');
+const { ensureStreamingDoor, streamingServerDoor } = require('stremio/common/streamingDoor');
+const { useWakeLock } = require('stremio/common/wakeLock');
 const { default: useDoubleTapSeek } = require('./useDoubleTapSeek');
 const { default: SeekIndicator } = require('./SeekIndicator/SeekIndicator');
 
@@ -448,6 +450,16 @@ const Player = ({ urlParams, queryParams }) => {
         };
     }, [onPlayPause, onGamepadSeekAndVol]);
 
+    // Keep the screen awake while the film is playing inline. No-op wherever the API is absent.
+    useWakeLock(video.state.paused === false);
+
+    // Which door this device reaches the streaming server through. The probe is fired as soon as
+    // the player mounts and nothing waits for it: the load below reads whatever verdict exists at
+    // that moment, so the worst case is one playback over the public door.
+    React.useEffect(() => {
+        ensureStreamingDoor(streamingServer.selected?.transportUrl);
+    }, [streamingServer.selected?.transportUrl]);
+
     React.useEffect(() => {
         setError(null);
         video.unload();
@@ -476,7 +488,10 @@ const Player = ({ urlParams, queryParams }) => {
                     casting ?
                         streamingServer.baseUrl
                         :
-                        streamingServer.selected.transportUrl
+                        // At home, the same server one hop away instead of out through the tunnel
+                        // and back. Falls straight back to the configured URL anywhere else, and
+                        // is left out of the casting path, where the receiver does the fetching.
+                        streamingServerDoor(streamingServer.selected.transportUrl)
                     :
                     null,
                 seriesInfo: player.seriesInfo,

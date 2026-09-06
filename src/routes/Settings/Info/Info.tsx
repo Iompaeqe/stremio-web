@@ -8,7 +8,17 @@ import {
     readAudioSessionType,
 } from 'stremio/common/audioSession';
 import { pictureInPictureReport } from 'stremio/common/pictureInPicture';
+import {
+    ensureStreamingDoor,
+    isHevcPassthroughEnabled,
+    isLanDoorEnabled,
+    playbackPathReport,
+    setHevcPassthroughEnabled,
+    setLanDoorEnabled,
+    streamingDoorReport,
+} from 'stremio/common/streamingDoor';
 import { tapReport } from 'stremio/common/tapDiagnostics';
+import { wakeLockReport } from 'stremio/common/wakeLock';
 import { Option, Section } from '../components';
 import styles from './Info.less';
 
@@ -41,6 +51,38 @@ const Info = ({ streamingServer }: Props) => {
     // came back. Tap it, and the value to the left is what WebKit accepted.
     const onAudioSessionClick = useCallback(() => {
         assertPlaybackAudioSession('settings-tap');
+        setTick((value) => value + 1);
+    }, []);
+
+    // The streaming server this device is configured for, before the LAN door is considered.
+    const configuredServerURL = useMemo(() => (
+        streamingServer?.selected?.transportUrl ?? streamingServer?.baseUrl ?? null
+    ), [streamingServer?.selected, streamingServer?.baseUrl]);
+
+    const playback = useMemo(() => ({
+        path: playbackPathReport(),
+        door: streamingDoorReport(configuredServerURL),
+        lan: isLanDoorEnabled(),
+        hevc: isHevcPassthroughEnabled(),
+        wakeLock: wakeLockReport(),
+    }), [tick, configuredServerURL]);
+
+    // Tapping the door line re-runs the probe, which is exactly what the owner wants to do when
+    // he has just walked in the door and wants to know whether the phone can see the LAN.
+    const onDoorClick = useCallback(() => {
+        ensureStreamingDoor(configuredServerURL).then(() => setTick((value) => value + 1));
+        setTick((value) => value + 1);
+    }, [configuredServerURL]);
+
+    // Both switches are tap-to-toggle, so a build that misbehaves on this phone can be put back
+    // on the old path from the sofa instead of from a rebuild.
+    const onLanDoorClick = useCallback(() => {
+        setLanDoorEnabled(!isLanDoorEnabled());
+        setTick((value) => value + 1);
+    }, []);
+
+    const onHevcClick = useCallback(() => {
+        setHevcPassthroughEnabled(!isHevcPassthroughEnabled());
         setTick((value) => value + 1);
     }, []);
 
@@ -110,6 +152,45 @@ const Info = ({ streamingServer }: Props) => {
             <Option label={'Player taps'}>
                 <div className={styles['label']}>
                     {audioSession.tap}
+                </div>
+            </Option>
+            {/*
+                "Playback path" is which stack decodes the stream on this device: WebKit's own HLS
+                (every iPhone) or hls.js over MediaSource (every desktop browser). It decides
+                nothing about URLs any more - those are correct on both - but it is the first thing
+                worth knowing when playback behaves differently here than on the PC.
+
+                "Streaming server" is the base URL playback actually builds its requests on, which
+                is not necessarily the one in Settings: at home the LAN door is used instead of the
+                tunnel. It says which, and how long ago that was established. Tap it to probe again
+                (do that after walking in the front door); tap "LAN door" to stop using it at all.
+
+                "HEVC passthrough" asks the server to hand x265 releases to this phone untouched
+                rather than re-encoding them to H.264. Tap it off if some release plays badly.
+            */}
+            <Option label={'Playback path'}>
+                <div className={styles['label']}>
+                    {playback.path}
+                </div>
+            </Option>
+            <Option label={'Streaming server'}>
+                <div className={styles['label']} onClick={onDoorClick}>
+                    {playback.door}
+                </div>
+            </Option>
+            <Option label={'LAN door'}>
+                <div className={styles['label']} onClick={onLanDoorClick}>
+                    {playback.lan ? 'on (tap to turn off)' : 'off (tap to turn on)'}
+                </div>
+            </Option>
+            <Option label={'HEVC passthrough'}>
+                <div className={styles['label']} onClick={onHevcClick}>
+                    {playback.hevc ? 'on (tap to turn off)' : 'off (tap to turn on)'}
+                </div>
+            </Option>
+            <Option label={'Screen wake lock'}>
+                <div className={styles['label']}>
+                    {playback.wakeLock}
                 </div>
             </Option>
             {
