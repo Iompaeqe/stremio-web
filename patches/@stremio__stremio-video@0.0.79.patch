@@ -495,29 +495,29 @@ index 5e51c7976e73b9875217680b0d193a3a40877568..b8cb4798183344867f2c7ace6baa6229
 +// The port the streaming server always listens on; its own loopback view of itself.
 +var SERVER_LOCAL_ORIGIN = 'http://127.0.0.1:11470';
 +
-+// The switch for advertising HEVC to the streaming server on the native-HLS path. Default on;
-+// Settings -> Info shows it and tapping it writes '0' here, so a release that misbehaves can be
-+// put back on the H.264 path from the phone without a rebuild.
++// The switch for advertising HEVC to the streaming server on the native-HLS path. DEFAULT OFF
++// since 2026-09-07 — see advertisedVideoCodecs for what breaks. Settings -> Info shows it and
++// tapping it writes '1' here, which is the only thing that turns the passthrough on.
 +var HEVC_PASSTHROUGH_KEY = 'homeiomp.hevc';
 +
 +function hevcPassthroughEnabled() {
 +    try {
-+        return window.localStorage.getItem(HEVC_PASSTHROUGH_KEY) !== '0';
++        return window.localStorage.getItem(HEVC_PASSTHROUGH_KEY) === '1';
 +    } catch (error) {
-+        return true;
++        return false;
 +    }
 +}
 +
 +// What this device asks the streaming server to deliver.
 +//
-+// An iPhone decodes HEVC in hardware, but Safari answers canPlayType() with "" for the 'hev1'
-+// spelling mediaCapabilities probes with — it only admits to 'hvc1' — so the advertised list comes
-+// back h264-only and the server re-encodes every x265 release into H.264 for the whole length of
-+// the film. That is the expensive path (a pinned GPU, a hard bitrate ceiling) and the fragile one.
-+// Advertised, the server copies the video track through instead and only remuxes.
-+//
-+// Confined to the native-HLS path: everywhere hls.js runs, the probe result is trustworthy and is
-+// left exactly as it was.
++// An iPhone decodes HEVC in hardware, so advertising it makes the server copy the x265 track
++// through instead of re-encoding every release to H.264 for the length of the film. That is worth
++// having, and it does not work yet — which is why it is off unless switched on. stremio-server's
++// copy writes the fMP4 sample entry as 'hev1' and WebKit only decodes the 'hvc1' spelling, so the
++// element takes the init segment, a couple of fragments, and then plays nothing at all (measured
++// 2026-09-07: encoder=copy, segments=2, no error, no frames). Turning this back on needs
++// '-tag:v hvc1' added on the server's side first — ops/stremio/ffmpeg-seeksafe.sh — not a change
++// here. Confined to the native-HLS path; wherever hls.js runs the probe result is left as it was.
 +function advertisedVideoCodecs(videoCodecs) {
 +    if (!nativeHlsOnly() || !hevcPassthroughEnabled() || !Array.isArray(videoCodecs)) {
 +        return videoCodecs;

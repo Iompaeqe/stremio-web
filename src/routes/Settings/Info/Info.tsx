@@ -185,7 +185,7 @@ const Info = ({ streamingServer }: Props) => {
             </Option>
             <Option label={'HEVC passthrough'}>
                 <div className={styles['label']} onClick={onHevcClick}>
-                    {playback.hevc ? 'on (tap to turn off)' : 'off (tap to turn on)'}
+                    {playback.hevc ? 'on (tap to turn off)' : 'off — needs hvc1 on the server (tap to try)'}
                 </div>
             </Option>
             <Option label={'Screen wake lock'}>

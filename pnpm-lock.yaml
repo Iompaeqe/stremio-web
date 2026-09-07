@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@stremio/stremio-video@0.0.79':
-    hash: 8970092e635011f19c79e7f879d54453a013cc8ee5a73bf1acabec99bfe9d76c
+    hash: 13142895e6358184a98c69968ed3b1c9c2cbb9bd572f95cededb7de7af9ffc0e
     path: patches/@stremio__stremio-video@0.0.79.patch
 
 importers:
@@ -30,7 +30,7 @@ importers:
         version: 5.10.0
       '@stremio/stremio-video':
         specifier: 0.0.79
-        version: 0.0.79(patch_hash=8970092e635011f19c79e7f879d54453a013cc8ee5a73bf1acabec99bfe9d76c)
+        version: 0.0.79(patch_hash=13142895e6358184a98c69968ed3b1c9c2cbb9bd572f95cededb7de7af9ffc0e)
       a-color-picker:
         specifier: 1.2.1
         version: 1.2.1
@@ -6455,7 +6455,7 @@ snapshots:
 
   '@stremio/stremio-icons@5.10.0': {}
 
-  '@stremio/stremio-video@0.0.79(patch_hash=8970092e635011f19c79e7f879d54453a013cc8ee5a73bf1acabec99bfe9d76c)':
+  '@stremio/stremio-video@0.0.79(patch_hash=13142895e6358184a98c69968ed3b1c9c2cbb9bd572f95cededb7de7af9ffc0e)':
     dependencies:
       buffer: 6.0.3
       color: 4.2.3

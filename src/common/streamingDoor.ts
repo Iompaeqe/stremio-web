@@ -157,20 +157,27 @@ export const streamingServerDoor = (streamingServerURL: string | null | undefine
 // this end only shows the switch and flips it. On means an iPhone asks for x265 to be passed
 // through untouched instead of re-encoded to H.264 for the length of the film. It only has any
 // effect on the native-HLS path.
+//
+// OFF BY DEFAULT since 2026-09-07, and it has to stay that way until the server changes. The
+// passthrough works exactly as designed — the server stops transcoding and copies the track — but
+// its ffmpeg writes the fMP4 sample entry as 'hev1', and WebKit decodes only the 'hvc1' spelling.
+// The element fetches the init segment and two fragments and then sits there showing nothing: no
+// error, no frames, which reads on the phone as "won't stream even though it's cached". The
+// switch stays here so the fix can be tried from the sofa once the server tags hvc1.
 const HEVC_KEY = 'homeiomp.hevc';
 
 export const isHevcPassthroughEnabled = (): boolean => {
     try {
-        return localStorage.getItem(HEVC_KEY) !== '0';
+        return localStorage.getItem(HEVC_KEY) === '1';
     } catch (_) {
-        return true;
+        return false;
     }
 };
 
 export const setHevcPassthroughEnabled = (enabled: boolean): void => {
     try {
-        if (enabled) localStorage.removeItem(HEVC_KEY);
-        else localStorage.setItem(HEVC_KEY, '0');
+        if (enabled) localStorage.setItem(HEVC_KEY, '1');
+        else localStorage.removeItem(HEVC_KEY);
     } catch (_) {
         // A diagnostic must never break playback.
     }
