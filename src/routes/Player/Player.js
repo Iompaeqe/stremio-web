@@ -33,7 +33,7 @@ const Video = require('./Video');
 const { default: Indicator } = require('./Indicator/Indicator');
 const { default: useMediaSession } = require('./useMediaSession');
 const { isPictureInPictureSupported, recordPictureInPicture, togglePictureInPicture } = require('stremio/common/pictureInPicture');
-const { ensureStreamingDoor, streamingServerDoor } = require('stremio/common/streamingDoor');
+const { ensureStreamingDoor, isLanDoorBase, noteStreamingDoorFailure, streamingServerDoor } = require('stremio/common/streamingDoor');
 const { useWakeLock } = require('stremio/common/wakeLock');
 const { default: useDoubleTapSeek } = require('./useDoubleTapSeek');
 const { default: SeekIndicator } = require('./SeekIndicator/SeekIndicator');
@@ -178,6 +178,13 @@ const Player = ({ urlParams, queryParams }) => {
     const playingOnExternalDevice = React.useRef(false);
     const [error, setError] = React.useState(null);
 
+    // HomeIomp (STR-27). The streaming server base the running stream was actually built on, the
+    // last time the LAN door was abandoned, and the counter that asks the load effect below to
+    // build the same stream again on the door that is correct now.
+    const doorBase = React.useRef(null);
+    const lastDoorFallbackAt = React.useRef(0);
+    const [doorRetry, setDoorRetry] = React.useState(0);
+
     const isNavigating = React.useRef(false);
 
     const VIDEO_SCALES = ['contain', 'cover', 'fill'];
@@ -235,6 +242,22 @@ const Player = ({ urlParams, queryParams }) => {
 
     const onError = React.useCallback((error) => {
         console.error('Player', error);
+
+        // HomeIomp (STR-27): a stream built on the LAN door that fails is almost always a phone
+        // that has walked out of the house since the door was decided. lan.homeiomp.xyz resolves
+        // to a private address that exists nowhere else, so not one byte of that failure reached
+        // the server and there is nothing for the owner to act on — the right answer is to drop
+        // the LAN door and build the same stream again through the tunnel, not to show an error.
+        // noteStreamingDoorFailure holds the LAN door off for two minutes, so the retry is on the
+        // tunnel by construction; the ten-second floor is belt and braces against a loop.
+        if (isLanDoorBase(doorBase.current) && (Date.now() - lastDoorFallbackAt.current) > 10 * 1000) {
+            lastDoorFallbackAt.current = Date.now();
+            noteStreamingDoorFailure(doorBase.current, error?.message ?? 'playback failed');
+            doorBase.current = null;
+            setDoorRetry((value) => value + 1);
+            return;
+        }
+
         if (error.critical) {
             setError(error);
         } else {
@@ -453,38 +476,29 @@ const Player = ({ urlParams, queryParams }) => {
     // Keep the screen awake while the film is playing inline. No-op wherever the API is absent.
     useWakeLock(video.state.paused === false);
 
-    // Which door this device reaches the streaming server through. The probe is fired as soon as
-    // the player mounts and nothing waits for it: the load below reads whatever verdict exists at
-    // that moment, so the worst case is one playback over the public door.
+    // Which door this device reaches the streaming server through. Fired as soon as the player
+    // mounts so the answer is usually already in hand by the time anything is loaded; the load
+    // effect below awaits it anyway, because a verdict of "the LAN" that has gone stale is the one
+    // way a stream can be built on an address this device can no longer reach (STR-27).
     React.useEffect(() => {
         ensureStreamingDoor(streamingServer.selected?.transportUrl);
     }, [streamingServer.selected?.transportUrl]);
 
     React.useEffect(() => {
+        let abandoned = false;
         setError(null);
         video.unload();
 
         if (player.selected && player.stream?.type === 'Ready' && streamingServer.settings?.type !== 'Loading') {
-            video.load({
-                stream: {
-                    ...player.stream.content,
-                    subtitles: streamSubtitles
-                },
-                autoplay: true,
-                time: player.libraryItem !== null &&
-                    player.selected.streamRequest !== null &&
-                    player.selected.streamRequest.path !== null &&
-                    player.libraryItem.state.video_id === player.selected.streamRequest.path.id ?
-                    player.libraryItem.state.timeOffset
-                    :
-                    0,
-                forceTranscoding: forceTranscoding || casting,
-                maxAudioChannels: settings.surroundSound ? 32 : 2,
-                hardwareDecoding: settings.hardwareDecoding,
-                assSubtitlesStyling: settings.assSubtitlesStyling,
-                videoMode: settings.videoMode,
-                platform: platform.name,
-                streamingServerURL: streamingServer.baseUrl ?
+            // Settle the door BEFORE any URL is built on it. This resolves immediately unless the
+            // last verdict is actually stale — twenty seconds for the LAN, five minutes for the
+            // tunnel, or anything at all since the network last changed — and at worst costs the
+            // 1.5s probe timeout once. Whatever the probe decides, playback proceeds: the door
+            // falls back to the configured URL on its own.
+            ensureStreamingDoor(streamingServer.selected?.transportUrl).catch(() => null).then(() => {
+                if (abandoned) return;
+
+                const streamingServerURL = streamingServer.baseUrl ?
                     casting ?
                         streamingServer.baseUrl
                         :
@@ -493,14 +507,43 @@ const Player = ({ urlParams, queryParams }) => {
                         // is left out of the casting path, where the receiver does the fetching.
                         streamingServerDoor(streamingServer.selected.transportUrl)
                     :
-                    null,
-                seriesInfo: player.seriesInfo,
-            }, {
-                chromecastTransport: services.chromecast.active ? services.chromecast.transport : null,
-                shellTransport: platform.shell.active ? platform.shell : null,
+                    null;
+                // Remembered so onError can tell "the LAN door has gone away" apart from a real
+                // playback failure, and rebuild this same stream on the tunnel.
+                doorBase.current = streamingServerURL;
+
+                video.load({
+                    stream: {
+                        ...player.stream.content,
+                        subtitles: streamSubtitles
+                    },
+                    autoplay: true,
+                    time: player.libraryItem !== null &&
+                        player.selected.streamRequest !== null &&
+                        player.selected.streamRequest.path !== null &&
+                        player.libraryItem.state.video_id === player.selected.streamRequest.path.id ?
+                        player.libraryItem.state.timeOffset
+                        :
+                        0,
+                    forceTranscoding: forceTranscoding || casting,
+                    maxAudioChannels: settings.surroundSound ? 32 : 2,
+                    hardwareDecoding: settings.hardwareDecoding,
+                    assSubtitlesStyling: settings.assSubtitlesStyling,
+                    videoMode: settings.videoMode,
+                    platform: platform.name,
+                    streamingServerURL,
+                    seriesInfo: player.seriesInfo,
+                }, {
+                    chromecastTransport: services.chromecast.active ? services.chromecast.transport : null,
+                    shellTransport: platform.shell.active ? platform.shell : null,
+                });
             });
         }
-    }, [streamingServer.baseUrl, player.selected, player.stream, streamSubtitles, forceTranscoding, casting]);
+
+        return () => {
+            abandoned = true;
+        };
+    }, [streamingServer.baseUrl, player.selected, player.stream, streamSubtitles, forceTranscoding, casting, doorRetry]);
 
     React.useEffect(() => {
         !seeking && timeChanged(video.state.time, video.state.duration, video.state.manifest?.name);

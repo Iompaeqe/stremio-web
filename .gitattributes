@@ -1,0 +1,5 @@
+# The pnpm patch is hashed byte for byte in pnpm-lock.yaml (patchedDependencies -> hash), so a
+# checkout that rewrote its line endings would fail `pnpm install --frozen-lockfile` before it ever
+# got as far as failing to apply. Keep these files exactly as they were committed, on every
+# platform — the working copy on Windows included.
+patches/** text eol=lf

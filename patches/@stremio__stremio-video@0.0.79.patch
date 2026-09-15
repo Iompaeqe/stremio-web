@@ -462,7 +462,7 @@ index 5e51c7976e73b9875217680b0d193a3a40877568..b8cb4798183344867f2c7ace6baa6229
  var hat = require('hat');
  var cloneDeep = require('lodash.clonedeep');
  var deepFreeze = require('deep-freeze');
-@@ -7,9 +6,103 @@ var mediaCapabilities = require('../mediaCapabilities');
+@@ -7,9 +6,124 @@ var mediaCapabilities = require('../mediaCapabilities');
  var convertStream = require('./convertStream');
  var fetchVideoParams = require('./fetchVideoParams');
  var isPlayerLoaded = require('./isPlayerLoaded');
@@ -532,11 +532,25 @@ index 5e51c7976e73b9875217680b0d193a3a40877568..b8cb4798183344867f2c7ace6baa6229
 +    return videoCodecs.concat(['h265', 'hevc']);
 +}
 +
-+function serverLocalMediaURL(streamingServerURL, mediaURL, infoHash, fileIdx) {
-+    if (!nativeHlsOnly()) {
-+        return mediaURL;
-+    }
++// Whether a URL already points at the machine the streaming server itself runs on. A desktop
++// install configured as http://127.0.0.1:11470/ is already fetching over loopback and needs no
++// correction at all.
++function isLoopbackOrigin(parsed) {
++    var hostname = parsed.hostname.replace(/^\[|\]$/g, '');
++    return hostname === 'localhost' || hostname === '::1' || hostname.indexOf('127.') === 0;
++}
 +
++function serverLocalMediaURL(streamingServerURL, mediaURL, infoHash, fileIdx) {
++    // No decoder gate here (STR-26, 2026-09-15). Whether the streaming server may fetch its own
++    // public URL has nothing to do with whether this browser owns MediaSource, and the day an iOS
++    // update started exposing window.MediaSource in the web view the rewrite silently went away
++    // with the gate: the phone sent the public https://homeiomp.xyz/stremio-server/<ih>/<idx>, the
++    // server fetched itself through Cloudflare Access, got the login redirect, and every probe
++    // died with "Probe process exited with code: 1" — read on the phone as "video isn't
++    // supported". So the rewrite now happens whenever the streaming server is NOT already
++    // addressed on a loopback origin, whatever the browser is. The server rewrites our own URLs
++    // too since the same day (ops/stremio/local-media-url.js and the ffmpeg/ffprobe wrappers), so
++    // this side only has to be correct, not clever.
 +    if (typeof infoHash !== 'string' || infoHash.length === 0 || fileIdx === null || fileIdx === undefined || !isFinite(fileIdx)) {
 +        return mediaURL;
 +    }
@@ -550,7 +564,14 @@ index 5e51c7976e73b9875217680b0d193a3a40877568..b8cb4798183344867f2c7ace6baa6229
 +        return mediaURL;
 +    }
 +
-+    // Only files served by this streaming server can be re-addressed on its loopback origin.
++    // Already loopback: leave it exactly as it was.
++    if (isLoopbackOrigin(parsedServerURL)) {
++        return mediaURL;
++    }
++
++    // Only files served by this streaming server can be re-addressed on its loopback origin. This
++    // covers the LAN door too (https://lan.homeiomp.xyz/stremio-server/), which is the very same
++    // container on the very same machine.
 +    if (parsedMediaURL.origin !== parsedServerURL.origin) {
 +        return mediaURL;
 +    }

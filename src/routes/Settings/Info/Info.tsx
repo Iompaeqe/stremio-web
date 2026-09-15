@@ -68,9 +68,11 @@ const Info = ({ streamingServer }: Props) => {
     }), [tick, configuredServerURL]);
 
     // Tapping the door line re-runs the probe, which is exactly what the owner wants to do when
-    // he has just walked in the door and wants to know whether the phone can see the LAN.
+    // he has just walked in the door and wants to know whether the phone can see the LAN. `force`
+    // makes it probe whatever the last verdict was, and forgives a LAN door that has been held off
+    // after failing a request — the tap is the owner saying "try it again now".
     const onDoorClick = useCallback(() => {
-        ensureStreamingDoor(configuredServerURL).then(() => setTick((value) => value + 1));
+        ensureStreamingDoor(configuredServerURL, { force: true }).then(() => setTick((value) => value + 1));
         setTick((value) => value + 1);
     }, [configuredServerURL]);
 
@@ -162,8 +164,10 @@ const Info = ({ streamingServer }: Props) => {
 
                 "Streaming server" is the base URL playback actually builds its requests on, which
                 is not necessarily the one in Settings: at home the LAN door is used instead of the
-                tunnel. It says which, and how long ago that was established. Tap it to probe again
-                (do that after walking in the front door); tap "LAN door" to stop using it at all.
+                tunnel. It says which, how long ago that was established and what established it -
+                a startup probe, a network change, coming back to the foreground, or the LAN door
+                failing a request mid-stream and being abandoned for the tunnel. Tap it to probe
+                again right now; tap "LAN door" to stop using it at all.
 
                 "HEVC passthrough" asks the server to hand x265 releases to this phone untouched
                 rather than re-encoding them to H.264. Tap it off if some release plays badly.

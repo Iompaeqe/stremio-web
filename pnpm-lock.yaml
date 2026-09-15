@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@stremio/stremio-video@0.0.79':
-    hash: 13142895e6358184a98c69968ed3b1c9c2cbb9bd572f95cededb7de7af9ffc0e
+    hash: e768853ba84a4297817729f2100526e5892d08273658c00cd7968aff5e536717
     path: patches/@stremio__stremio-video@0.0.79.patch
 
 importers:
