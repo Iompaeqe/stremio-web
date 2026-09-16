@@ -24,3 +24,7 @@ StartStremioNoClickPause.vbs
 CODE_OF_CONDUCT.md
 LICENSE.md
 README.md
+
+# The production .env must never enter the build context (2026-09-16; see the other apps).
+.env
+.env.*
